@@ -1,0 +1,28 @@
+# torch comes from the base image and is pinned via a constraints file.
+
+# LM scoring
+transformers
+accelerate
+safetensors
+sentencepiece
+huggingface_hub
+
+# Data pipeline: hanzi to zhuyin, script conversion
+g2pw
+onnxruntime
+pypinyin
+opencc
+datasets
+
+# Evaluation and resource measurement
+jiwer
+nvidia-ml-py
+psutil
+numpy
+pandas
+tqdm
+
+# Dev tools
+ipython
+pytest
+ruff
