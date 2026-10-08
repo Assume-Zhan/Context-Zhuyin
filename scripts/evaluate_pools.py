@@ -36,6 +36,9 @@ BASELINES = {
     "beam char 2-gram": "beam-o2",
     "beam char 3-gram": "beam-o3",
     "beam char 4-gram": "beam-o4",
+    # Same decoder, n-gram trained on PTT and Wikipedia only: news and web are
+    # then sources the n-gram never saw, like libchewing 0.14 (CC-100).
+    "beam char 4-gram, PTT+wiki n-gram": "beam-o4-ptt-wiki",
 }
 
 
@@ -47,7 +50,7 @@ def source_list(row: dict) -> list[str]:
 
 def compose(policy: str, src: dict[str, dict], k: int) -> list[str]:
     """Build a pool; the first entry is the pool's own 1-best."""
-    if policy in ("chewing-0.13", "chewing-0.14", "beam-o4", "beam-o3", "beam-o2"):
+    if policy in BASELINES.values():
         seq = source_list(src[policy])
     elif policy == "c14+beam4":
         c14 = src["chewing-0.14"]
@@ -143,7 +146,9 @@ def main() -> None:
     ap.add_argument("--pools", nargs="+", default=["chewing-0.14", "beam-o4", "c14+beam4"])
     ap.add_argument("--ks", nargs="+", type=int, default=[10, 30])
     ap.add_argument("--out", default="outputs/reports")
+    ap.add_argument("--save-errors", action="store_true", help="also save per example errors (npz)")
     args = ap.parse_args()
+    all_errors: dict[str, np.ndarray] = {}
 
     score_dir = Path(args.score_root) / args.tag
     meta = json.loads((score_dir / "meta.json").read_text()) if (score_dir / "meta.json").exists() else {}
@@ -211,12 +216,17 @@ def main() -> None:
             )
         lines.append("")
         report["conditions"][cond] = cond_rep
+        for name, errs in systems.items():
+            for d in args.domains:
+                all_errors[f"{cond}|{name}|{d}"] = errs[d]
         print("\n".join(lines[-(len(systems) + 4) :]), flush=True)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / f"pools.{args.tag}.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
     (out / f"pools.{args.tag}.md").write_text("\n".join(lines) + "\n")
+    if args.save_errors:
+        np.savez_compressed(out / f"pools.{args.tag}.errors.npz", **all_errors)
 
 
 if __name__ == "__main__":
