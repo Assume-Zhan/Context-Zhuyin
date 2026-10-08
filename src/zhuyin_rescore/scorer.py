@@ -79,6 +79,8 @@ class LMScorer:
     @torch.inference_mode()
     def score_reference(self, context: str, candidates: list[str]) -> list[float]:
         """Full sequence scoring, one padded batch, no cache. Slow but simple."""
+        if not candidates:
+            return []
         prefix = self.prefix_ids(context)
         cand_ids = [self.encode(c) for c in candidates]
         seqs = [prefix + ids for ids in cand_ids]
@@ -112,6 +114,8 @@ class LMScorer:
         cache: optional result of context_cache(context) to reuse across
         calls with the same committed context.
         """
+        if not candidates:
+            return []
         past, last_hidden, p = cache if cache is not None else self.context_cache(context)
         n = len(candidates)
         cand_ids = [self.encode(c) for c in candidates]
