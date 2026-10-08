@@ -64,7 +64,7 @@ class Engine:
         weights: Weights | None = None,
         beam: int = 32,
         k: int = 10,
-        fusion: tuple[float, float] = (0.75, 2.0),
+        fusion: tuple[float, float] = (0.05, 2.0),
     ):
         if lexicon.condition != "mixed":
             raise ValueError("the IME needs a lexicon built with condition='mixed'")

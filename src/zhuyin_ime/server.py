@@ -152,11 +152,11 @@ def serve(socket_path: str, engine: Engine, reranker: Reranker | None = None, re
         threading.Thread(target=c.serve, daemon=True).start()
 
 
-def build_engine(ngram: str, dict_dir: str, beam: int) -> Engine:
+def build_engine(ngram: str, dict_dir: str, beam: int, fusion: tuple[float, float] = (0.05, 2.0)) -> Engine:
     from zhuyin_rescore.lexicon import Lexicon, load_entries
     from zhuyin_rescore.ngram import CharNgram
 
-    return Engine(Lexicon(load_entries(dict_dir), "mixed"), CharNgram.load(ngram), beam=beam)
+    return Engine(Lexicon(load_entries(dict_dir), "mixed"), CharNgram.load(ngram), beam=beam, fusion=fusion)
 
 
 def build_scorer(model: str, device: str, dtype: str, threads: int, graph: bool = False):
@@ -187,11 +187,15 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=1, help="CPU threads for the reranker")
     ap.add_argument("--graph", action="store_true", help="replay the scoring forward as a CUDA graph")
     ap.add_argument("--debounce-ms", type=float, default=100.0)
+    # Fusion score = lm + a * ngram - beta * [not the decoder 1-best]; tuned on
+    # dev for the zh-TW model (use about a=0.75 with the base Qwen model).
+    ap.add_argument("--fusion-a", type=float, default=0.05)
+    ap.add_argument("--fusion-beta", type=float, default=2.0)
     ap.add_argument("--nice", type=int, default=5, help="lower the process priority")
     args = ap.parse_args()
 
     os.nice(args.nice)
-    engine = build_engine(args.ngram, args.dict_dir, args.beam)
+    engine = build_engine(args.ngram, args.dict_dir, args.beam, (args.fusion_a, args.fusion_beta))
     reranker = None
     if args.reranker:
         scorer = build_scorer(args.reranker, args.device, args.dtype, args.threads, args.graph)

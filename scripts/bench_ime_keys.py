@@ -27,6 +27,7 @@ def main() -> None:
     ap.add_argument("--sentences", type=int, default=200)
     ap.add_argument("--condition", default="full", choices=["full", "notone"])
     ap.add_argument("--server-args", default="", help="extra args, e.g. '--reranker outputs/lm/...'")
+    ap.add_argument("--settle-ms", type=float, default=0.0, help="wait for reranker pushes before Enter")
     args = ap.parse_args()
 
     sock = os.path.join(tempfile.mkdtemp(), "ime.sock")
@@ -34,7 +35,7 @@ def main() -> None:
     cmd += args.server_args.split()
     server = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
-        for _ in range(600):
+        for _ in range(1200):
             if os.path.exists(sock):
                 break
             time.sleep(0.1)
@@ -48,6 +49,10 @@ def main() -> None:
                     t0 = time.perf_counter()
                     client.key(char=ch)
                     lat.append((time.perf_counter() - t0) * 1000)
+            if args.settle_ms:
+                time.sleep(args.settle_ms / 1000)
+                client.read_available()
+                client.take_pushes()
             st = client.key(name="Return")
             ok += st["commit"] == r["text"]
         lat = np.array(lat)
@@ -59,7 +64,7 @@ def main() -> None:
                     "p50_ms": round(float(np.percentile(lat, 50)), 2),
                     "p95_ms": round(float(np.percentile(lat, 95)), 2),
                     "max_ms": round(float(lat.max()), 2),
-                    "sentence_acc_decoder_only": round(ok / len(rows), 3),
+                    "sentence_acc": round(ok / len(rows), 3),
                 }
             )
         )

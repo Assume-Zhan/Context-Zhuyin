@@ -36,9 +36,25 @@ host desktop session                      dev container (or any machine with the
 In the dev container (from the repo root):
 
 ```bash
-python -m zhuyin_ime.server                                         # decoder only, CPU
-python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw  # plus GPU reranker
+python -m zhuyin_ime.server                                                 # decoder only, CPU
+python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw --graph  # plus GPU reranker
 ```
+
+`--graph` replays the reranker as a CUDA graph (7.5 ms per call instead of
+20 ms on the RTX 5090). The default fusion weights (`--fusion-a 0.05
+--fusion-beta 2`) are tuned for the zh-TW model; use about `--fusion-a 0.75`
+with the base Qwen model.
+
+Measured by typing 200 Common Voice dev sentences through the server
+(`scripts/bench_ime_keys.py`, RTX 5090 for the reranker):
+
+| server | key latency p50 / p95 / max | sentences correct, with tones | toneless |
+| --- | --- | --- | --- |
+| decoder only (CPU) | 0.07 / 3.0 / 5.5 ms | 79.5% | 69.0% |
+| + zh-TW reranker, CUDA graph | 0.17 / 5.5 / 9.7 ms | 83.0% | 72.0% |
+
+The reranker runs in its own thread and pushes its result about 100 ms
+(debounce) after the last syllable, so keystrokes never wait for it.
 
 The server lowers its own priority (`--nice 5`), uses one CPU thread for
 the reranker, and sleeps in `recv` when idle.
