@@ -16,11 +16,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/opt/cargo/bin:${PATH}
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential ca-certificates curl git pkg-config libsqlite3-dev \
+        build-essential ca-certificates cmake curl git pkg-config libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# libchewing requires CMake 3.27 or newer; the pip wheel is the easiest way.
-RUN pip install --no-cache-dir "cmake>=3.27"
 
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal \
         --default-toolchain ${RUST_TOOLCHAIN}
@@ -47,7 +44,10 @@ ARG USERNAME=dev
 ARG UID=1000
 ARG GID=1000
 
-ENV DEBIAN_FRONTEND=noninteractive
+# The base image installs torch with pip into the system Python 3.12, which
+# is marked externally managed (PEP 668). Allow pip to keep using it.
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_BREAK_SYSTEM_PACKAGES=1
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ca-certificates curl git git-lfs htop less \
@@ -65,7 +65,7 @@ RUN echo /opt/libchewing/lib > /etc/ld.so.conf.d/libchewing.conf \
 # Python deps. The constraints file pins the torch build shipped with the
 # base image so pip never replaces it with a different CUDA variant.
 COPY requirements.txt /tmp/requirements.txt
-RUN (pip freeze | grep -iE '^(torch|torchvision|torchaudio|triton)==' || true) > /tmp/constraints.txt \
+RUN (pip freeze | grep -iE '^(torch|torchvision|torchaudio|triton|numpy)==' || true) > /tmp/constraints.txt \
     && pip install --no-cache-dir -c /tmp/constraints.txt -r /tmp/requirements.txt \
     && rm -f /tmp/requirements.txt /tmp/constraints.txt
 
