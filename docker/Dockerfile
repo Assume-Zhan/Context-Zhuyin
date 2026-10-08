@@ -22,7 +22,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal \
         --default-toolchain ${RUST_TOOLCHAIN}
 
-RUN git clone --depth 1 --branch ${LIBCHEWING_VERSION} ${LIBCHEWING_REPO} /src/libchewing \
+RUN git clone --depth 1 --branch ${LIBCHEWING_VERSION} \
+        --recurse-submodules --shallow-submodules \
+        ${LIBCHEWING_REPO} /src/libchewing \
     && cmake -S /src/libchewing -B /src/libchewing/build \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/opt/libchewing \
