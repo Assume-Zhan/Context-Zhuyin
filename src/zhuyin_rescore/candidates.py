@@ -162,9 +162,7 @@ class CandidateGenerator:
         if self.use_tab:
             cset.tab = tab_nbest(self.chewing, onebest)
 
-        # Merge: 1-best, then the remaining Tab n-best and single substitutions
-        # interleaved by their list index, so both sources fill the pool.
-        seen = {onebest}
+        # Single substitutions, most frequent list entries first.
         subs = sorted(options, key=lambda s: (s.index, -s.length, s.pos))
         sub_texts = []
         sub_seen = {onebest}
@@ -175,17 +173,12 @@ class CandidateGenerator:
             sub_seen.add(text)
             sub_texts.append((text, s))
         cset.sub = [onebest] + [t for t, _ in sub_texts]
-        tab_alts = cset.tab[1:]
-        queue: list[tuple[str, str, Substitution | None]] = []
-        ti = si = 0
-        while ti < len(tab_alts) or si < len(sub_texts):
-            if ti < len(tab_alts):
-                queue.append((tab_alts[ti], "tab", None))
-                ti += 1
-            for _ in range(2):
-                if si < len(sub_texts):
-                    queue.append((sub_texts[si][0], "sub", sub_texts[si][1]))
-                    si += 1
+
+        # Merge: 1-best, then the engine's own n-best (higher Oracle@10 on
+        # dev than substitutions), then substitutions to fill the pool.
+        seen = {onebest}
+        queue: list[tuple[str, str, Substitution | None]] = [(t, "tab", None) for t in cset.tab[1:]]
+        queue += [(t, "sub", s) for t, s in sub_texts]
         for text, source, sub in queue:
             if len(cset.candidates) >= self.pool_size:
                 break
