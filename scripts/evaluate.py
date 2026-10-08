@@ -29,10 +29,27 @@ FOCUS_GROUPS = {
 }
 
 
-def load(cand_dir: Path, score_dir: Path, split: str, cond: str) -> list[dict]:
+def longest_common_substring(a: str, b: str) -> int:
+    best = 0
+    for i in range(len(a)):
+        for j in range(i + best + 1, len(a) + 1):
+            if a[i:j] not in b:
+                break
+            best = j - i
+    return best
+
+
+def overlaps_context(row: dict) -> bool:
+    """True if at least half of the clause already appears in the context."""
+    return longest_common_substring(row["text"], row["context"]) >= max(4, len(row["text"]) // 2)
+
+
+def load(cand_dir: Path, score_dir: Path, split: str, cond: str, exclude_overlap: bool = False) -> list[dict]:
     scores = {r["id"]: r for r in read_jsonl(score_dir / f"{split}.{cond}.jsonl")}
     rows = []
     for row in read_jsonl(cand_dir / f"{split}.{cond}.jsonl"):
+        if exclude_overlap and overlaps_context(row):
+            continue
         s = scores[row["id"]]
         row["lm"], row["lm_noctx"] = s["lm"], s["lm_noctx"]
         row["texts"] = [c["text"] for c in row["candidates"]]
@@ -104,7 +121,13 @@ def main() -> None:
     ap.add_argument("--conditions", nargs="+", default=list(CONDITIONS))
     ap.add_argument("--ks", nargs="+", type=int, default=[10, 30])
     ap.add_argument("--out", default="outputs/reports")
+    ap.add_argument(
+        "--exclude-overlap",
+        action="store_true",
+        help="drop examples whose clause is at least half contained in the context",
+    )
     args = ap.parse_args()
+    suffix = ".no-overlap" if args.exclude_overlap else ""
 
     cand_dir = Path(args.cand_dir)
     score_dir = Path(args.score_dir) / args.tag
@@ -112,15 +135,16 @@ def main() -> None:
     report = {"tag": args.tag, "meta": meta, "conditions": {}}
     lines = [
         f"Model: {meta.get('model', args.tag)} ({meta.get('dtype', '?')}), GPU: {meta.get('gpu', '?')}. "
-        "Fusion weights tuned on dev, numbers on test.",
+        "Fusion weights tuned on dev, numbers on test"
+        + (", clauses overlapping their context excluded." if args.exclude_overlap else "."),
         "",
         "| condition | system | k | mu | beta | CER | rel. CER reduction (95% CI) | SentAcc "
         "| recovered vs Oracle@k | fixed / broken sents |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for cond in args.conditions:
-        dev = load(cand_dir, score_dir, "dev", cond)
-        test = load(cand_dir, score_dir, "test", cond)
+        dev = load(cand_dir, score_dir, "dev", cond, args.exclude_overlap)
+        test = load(cand_dir, score_dir, "test", cond, args.exclude_overlap)
         base_err = errors(test, [r["onebest"] for r in test])
         base = summarize(test, base_err)
         cond_rep = {"baseline": base, "systems": {}}
@@ -170,6 +194,7 @@ def main() -> None:
                     f"{rel:.1%} ({lo:.1%} to {hi:.1%}) | {res['sent_acc']:.3f} | {rec:.1%} | "
                     f"{fixed_n} / {broken_n} |"
                 )
+        cond_rep["test_examples"] = len(test)
         report["conditions"][cond] = cond_rep
 
     lines += [
@@ -189,8 +214,9 @@ def main() -> None:
     print(text)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"eval.{args.tag}.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-    (out / f"eval.{args.tag}.md").write_text(text + "\n")
+    report_json = json.dumps(report, indent=2, ensure_ascii=False)
+    (out / f"eval.{args.tag}{suffix}.json").write_text(report_json + "\n")
+    (out / f"eval.{args.tag}{suffix}.md").write_text(text + "\n")
 
 
 if __name__ == "__main__":
