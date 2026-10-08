@@ -1,5 +1,10 @@
 # Phase 0 Results: Offline Benchmark
 
+> **Superseded baseline.** These results compare against libchewing 0.13.1
+> (unigram LM). libchewing 0.14 (word bigram LM) halves its CER on news, so
+> the gains below overstate the improvement over the current engine. See
+> [results-phase1.md](results-phase1.md) for the comparison against 0.14.
+
 Oct 8, 2026. All numbers below come from the dev host GPU, an **NVIDIA
 GeForce RTX 5090** (driver 580.173.02, torch 2.14.1+cu130). They are not
 RTX 3060 results; the 3060 measurement is still to be done.
