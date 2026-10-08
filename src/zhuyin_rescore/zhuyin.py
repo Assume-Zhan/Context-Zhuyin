@@ -120,6 +120,11 @@ def strip_tone(s: str) -> str:
     return syl.initial + syl.medial + syl.rime
 
 
+def has_tone(s: str) -> bool:
+    """True if the syllable carries a tone mark (tones 2 to 5)."""
+    return bool(s) and s[-1] in TONE_MARKS
+
+
 def initial_only(s: str) -> str:
     """Initial of a syllable, or its first symbol when it has no initial."""
     syl = parse_syllable(s)

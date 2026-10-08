@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from zhuyin_rescore.textproc import PURE_HAN, cp950_ok
-from zhuyin_rescore.zhuyin import derive_condition, normalize
+from zhuyin_rescore.zhuyin import derive_condition, has_tone, normalize, strip_tone
 
 DICT_FILES = ("tsi.dat", "word.dat", "alt.dat")
 
@@ -60,30 +60,74 @@ def load_entries(cache_dir: str | Path = "outputs/dict", syspath: str | None = N
 
 
 class Lexicon:
-    """Phrase lookup by condition specific reading key."""
+    """Phrase lookup by condition specific reading key.
+
+    Conditions: "full", "notone" and "initial" as in the benchmark, plus
+    "mixed" for live typing, where a syllable typed with a tone mark must
+    match exactly and a syllable typed without one matches any tone.
+    """
 
     def __init__(self, entries: list[Entry], condition: str, charset: str | None = "cp950", max_len: int = 6):
         self.condition = condition
         self.max_len = max_len
+        key_condition = "notone" if condition == "mixed" else condition
+        self._key_condition = key_condition
         index: dict[tuple[str, ...], dict[str, int]] = defaultdict(dict)
-        # Readings of each phrase, as condition keys, for consistency checks.
-        self.phrase_keys: dict[str, set[tuple[str, ...]]] = defaultdict(set)
+        # Full readings of every phrase, for exact matching and consistency checks.
+        self.full_readings: dict[str, set[tuple[str, ...]]] = defaultdict(set)
         for e in entries:
             if len(e.phrase) > max_len or not PURE_HAN.match(e.phrase):
                 continue
             if charset == "cp950" and not cp950_ok(e.phrase):
                 continue
-            key = tuple(derive_condition(list(e.full), condition))
+            key = tuple(derive_condition(list(e.full), key_condition))
             bucket = index[key]
             bucket[e.phrase] = max(bucket.get(e.phrase, 0), e.freq)
-            if len(e.phrase) > 1:
-                self.phrase_keys[e.phrase].add(key)
+            self.full_readings[e.phrase].add(e.full)
         # Sort each bucket by frequency, most frequent first.
         self.index = {k: sorted(v.items(), key=lambda kv: -kv[1]) for k, v in index.items()}
+        self._span_cache: dict[tuple[tuple[str, ...], int | None], list[tuple[str, int]]] = {}
+
+    def key(self, syllables: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+        if self.condition == "mixed":
+            return tuple(strip_tone(s) for s in syllables)
+        return tuple(syllables)
+
+    def _reading_ok(self, full: tuple[str, ...], syllables: tuple[str, ...]) -> bool:
+        if self.condition == "mixed":
+            return all(r == s for r, s in zip(full, syllables, strict=True) if has_tone(s))
+        return tuple(derive_condition(list(full), self.condition)) == syllables
 
     def lookup(self, key: tuple[str, ...], limit: int | None = None) -> list[tuple[str, int]]:
         hits = self.index.get(key, [])
         return hits[:limit] if limit else hits
+
+    def lookup_span(self, syllables: tuple[str, ...], limit: int | None = None) -> list[tuple[str, int]]:
+        """Phrases (most frequent first) whose reading matches the typed span."""
+        cache_key = (syllables, limit)
+        hit = self._span_cache.get(cache_key)
+        if hit is not None:
+            return hit
+        hits = self.index.get(self.key(syllables), [])
+        if self.condition == "mixed" and any(has_tone(s) for s in syllables):
+            hits = [
+                (p, f) for p, f in hits if any(self._reading_ok(r, syllables) for r in self.full_readings[p])
+            ]
+        hits = hits[:limit] if limit else hits
+        if len(self._span_cache) > 200_000:
+            self._span_cache.clear()
+        self._span_cache[cache_key] = hits
+        return hits
+
+    def reading_matches(self, phrase: str, syllables: tuple[str, ...]) -> bool | None:
+        """None if phrase is not a multi char dictionary word, else whether
+        any of its readings matches the typed syllables."""
+        if len(phrase) < 2:
+            return None
+        readings = self.full_readings.get(phrase)
+        if not readings:
+            return None
+        return any(len(r) == len(syllables) and self._reading_ok(r, syllables) for r in readings)
 
     def edges(self, syllables: list[str], single_limit: int | None = None):
         """All (start, end, phrase, freq) spans matching the condition input."""
@@ -91,8 +135,8 @@ class Lexicon:
         n = len(syllables)
         for i in range(n):
             for length in range(1, min(self.max_len, n - i) + 1):
-                key = tuple(syllables[i : i + length])
-                hits = self.lookup(key, single_limit if length == 1 else None)
+                limit = single_limit if length == 1 else None
+                hits = self.lookup_span(tuple(syllables[i : i + length]), limit)
                 for phrase, freq in hits:
                     out.append((i, i + length, phrase, freq))
         return out
