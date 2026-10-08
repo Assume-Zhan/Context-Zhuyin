@@ -9,8 +9,9 @@ end position; each extension is scored with
 
 where a mismatch is a window of 2 to 4 characters that crosses an edge
 boundary, is itself a dictionary phrase, and has no reading that matches the
-typed syllables (for example 長大 assembled from single characters for an
-input that is not read zhang da).
+typed syllables (for example a common two character word assembled from
+single characters whose own readings fit, for an input that is not read as
+that word).
 
 The search is pull based: the beam at end position j gathers extensions of
 the beams at j - 1 .. j - max_len. A beam only depends on the syllables
