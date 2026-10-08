@@ -59,6 +59,18 @@ class LMScorer:
             ctx = ctx[len(ctx) - self.max_context_tokens :] if len(ctx) > self.max_context_tokens else ctx
         return [self.start_id] + ctx
 
+    def _to_list(self, x: torch.Tensor) -> list[float]:
+        """Copy a result to the host without spinning a CPU core.
+
+        A plain device to host copy or torch.cuda.synchronize() may busy wait;
+        a blocking event lets the thread sleep until the GPU is done.
+        """
+        if x.is_cuda:
+            done = torch.cuda.Event(blocking=True)
+            done.record()
+            done.synchronize()
+        return x.cpu().tolist()
+
     def _token_logprobs(self, hidden: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         """Log-prob of each target given the hidden state that predicts it."""
         logits = self.lm_head(hidden).float()
@@ -84,7 +96,7 @@ class LMScorer:
         tgt = input_ids[:, p:width]
         lp = self._token_logprobs(h, tgt)
         mask = attn[:, p:width].to(lp.dtype)
-        return (lp * mask).sum(-1).tolist()
+        return self._to_list((lp * mask).sum(-1))
 
     @torch.inference_mode()
     def context_cache(self, context: str) -> tuple[DynamicCache, torch.Tensor, int]:
@@ -131,4 +143,4 @@ class LMScorer:
         # The first candidate token is predicted by the last prefix position.
         h = torch.cat([last_hidden.expand(n, -1, -1), hidden[:, :-1]], dim=1)
         lp = self._token_logprobs(h, input_ids)
-        return (lp * cand_mask.to(lp.dtype)).sum(-1).tolist()
+        return self._to_list((lp * cand_mask.to(lp.dtype)).sum(-1))
