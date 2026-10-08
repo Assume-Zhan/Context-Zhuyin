@@ -104,6 +104,14 @@ ENV LANG=en_US.UTF-8 \
     PATH=/opt/libchewing/bin:/home/${USERNAME}/.local/bin:${PATH}
 
 USER ${USERNAME}
+
+# Claude Code CLI (native installer, goes to ~/.local/bin). Its config and
+# login live in CLAUDE_CONFIG_DIR, which compose mounts as a named volume.
+ENV CLAUDE_CONFIG_DIR=/home/${USERNAME}/.claude
+RUN curl -fsSL https://claude.ai/install.sh | bash \
+    && rm -rf /home/${USERNAME}/.claude/downloads \
+    && mkdir -p /home/${USERNAME}/.claude
+
 WORKDIR /workspace
 
 CMD ["bash"]

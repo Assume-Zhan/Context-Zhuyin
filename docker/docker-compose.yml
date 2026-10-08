@@ -14,6 +14,7 @@ services:
     volumes:
       - ..:/workspace
       - hf-cache:/cache/huggingface
+      - claude-config:/home/dev/.claude
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
@@ -31,3 +32,4 @@ services:
 
 volumes:
   hf-cache:
+  claude-config:
