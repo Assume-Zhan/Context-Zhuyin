@@ -31,10 +31,16 @@ def main() -> None:
     ap.add_argument("--requests", type=int, default=1000)
     ap.add_argument("--warmup", type=int, default=20)
     ap.add_argument("--out-dir", default="outputs/bench")
+    ap.add_argument("--graph", action="store_true", help="time the CUDA graph scorer")
     args = ap.parse_args()
 
     rows = list(read_jsonl(args.candidates))
     scorer = LMScorer(args.model, dtype=args.dtype)
+    graph = None
+    if args.graph:
+        from zhuyin_rescore.graph_scorer import GraphScorer
+
+        graph = GraphScorer(scorer)
     torch.cuda.reset_peak_memory_stats()
 
     gpu_ms, wall_ms, ctx_ms = [], [], []
@@ -43,7 +49,11 @@ def main() -> None:
         row = rows[i % len(rows)]
         texts = [c["text"] for c in row["candidates"][: args.k]]
         t = time.perf_counter()
-        cache = scorer.context_cache(row["context"])
+        if graph is not None:
+            graph.set_context(row["context"])
+            cache = None
+        else:
+            cache = scorer.context_cache(row["context"])
         ctx_done = torch.cuda.Event(blocking=True)
         ctx_done.record()
         ctx_done.synchronize()
@@ -52,7 +62,10 @@ def main() -> None:
         end = torch.cuda.Event(enable_timing=True, blocking=True)
         t = time.perf_counter()
         start.record()
-        scorer.score_cached(row["context"], texts, cache=cache)
+        if graph is not None:
+            graph.score(row["context"], texts)
+        else:
+            scorer.score_cached(row["context"], texts, cache=cache)
         end.record()
         end.synchronize()
         w_ms = (time.perf_counter() - t) * 1000
@@ -64,8 +77,10 @@ def main() -> None:
     pynvml.nvmlInit()
     handle = pynvml.nvmlDeviceGetHandleByIndex(0)
     gpu_name = torch.cuda.get_device_name(0)
+    model_tag = args.model.rstrip("/").split("/")[-1]
     summary = {
-        "config": f"{args.model.split('/')[-1]}-{args.dtype}-k{args.k}",
+        "config": f"{model_tag}-{args.dtype}-k{args.k}" + ("-graph" if graph else ""),
+        "graph_fallbacks": graph.fallbacks if graph is not None else None,
         "gpu_name": gpu_name,
         "driver": pynvml.nvmlSystemGetDriverVersion(),
         "torch": torch.__version__,

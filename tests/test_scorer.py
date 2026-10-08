@@ -58,3 +58,17 @@ def test_context_truncation(scorer):
 def test_prefers_correct_homophone(scorer):
     scores = scorer.score_reference(CONTEXT, CANDS)
     assert scores.index(max(scores)) == 0
+
+
+def test_graph_scorer_matches_eager():
+    from zhuyin_rescore.graph_scorer import GraphScorer
+
+    s16 = LMScorer(MODEL, dtype="float16")
+    g = GraphScorer(s16)
+    for context in (CONTEXT, ""):
+        ref = s16.score_cached(context, CANDS)
+        assert g.score(context, CANDS) == pytest.approx(ref, abs=0.1)
+    # A request larger than the static shapes falls back to the eager path.
+    many = CANDS * 5
+    assert g.score(CONTEXT, many) == pytest.approx(s16.score_cached(CONTEXT, many), abs=1e-6)
+    assert g.fallbacks == 1

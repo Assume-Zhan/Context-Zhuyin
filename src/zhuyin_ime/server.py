@@ -159,7 +159,7 @@ def build_engine(ngram: str, dict_dir: str, beam: int) -> Engine:
     return Engine(Lexicon(load_entries(dict_dir), "mixed"), CharNgram.load(ngram), beam=beam)
 
 
-def build_scorer(model: str, device: str, dtype: str, threads: int):
+def build_scorer(model: str, device: str, dtype: str, threads: int, graph: bool = False):
     os.environ.setdefault("OMP_NUM_THREADS", str(threads))
     os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
     import torch
@@ -168,6 +168,10 @@ def build_scorer(model: str, device: str, dtype: str, threads: int):
 
     scorer = LMScorer(model, device=device, dtype=dtype)
     torch.set_num_threads(threads)
+    if graph:
+        from zhuyin_rescore.graph_scorer import GraphScorer
+
+        return GraphScorer(scorer)
     return scorer
 
 
@@ -181,6 +185,7 @@ def main() -> None:
     ap.add_argument("--device", default="cuda")
     ap.add_argument("--dtype", default="float16")
     ap.add_argument("--threads", type=int, default=1, help="CPU threads for the reranker")
+    ap.add_argument("--graph", action="store_true", help="replay the scoring forward as a CUDA graph")
     ap.add_argument("--debounce-ms", type=float, default=100.0)
     ap.add_argument("--nice", type=int, default=5, help="lower the process priority")
     args = ap.parse_args()
@@ -189,7 +194,7 @@ def main() -> None:
     engine = build_engine(args.ngram, args.dict_dir, args.beam)
     reranker = None
     if args.reranker:
-        scorer = build_scorer(args.reranker, args.device, args.dtype, args.threads)
+        scorer = build_scorer(args.reranker, args.device, args.dtype, args.threads, args.graph)
         reranker = Reranker(scorer, args.debounce_ms)
     print(f"zhuyin-ime server on {args.socket} (reranker: {args.reranker or 'off'})", flush=True)
     serve(args.socket, engine, reranker)
