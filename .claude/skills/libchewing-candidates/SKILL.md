@@ -32,6 +32,16 @@ when debugging the parsed phones.
 `chewing_get_phoneSeq` and `chewing_get_phoneSeqLen` return the parsed phone
 sequence; assert it matches the intended input before trusting results.
 
+## Versions
+
+- 0.13.1 (system default, unigram LM) and 0.14 (word bigram LM from the
+  architecture RFC, see `docs/survey-libchewing-rfc.md`). Pass the library
+  path and dictionary dir explicitly for 0.14 (`--lib`, `--syspath` in
+  `scripts/gen_candidates.py`) and never load both builds in one process.
+- Both expose the engine n-best through the Tab key: pressing Tab at the end
+  of the buffer cycles through up to 10 whole sentence conversions, then
+  wraps. Reset clears this state.
+
 ## Building top-k sentences (1-best plus local substitution)
 
 libchewing has no public whole sentence n-best API. Procedure from the proposal:

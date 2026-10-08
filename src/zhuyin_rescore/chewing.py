@@ -76,19 +76,27 @@ _SIGNATURES: dict[str, tuple[list, object]] = {
     "chewing_cand_string_by_index_static": ([_CTX, ctypes.c_int], ctypes.c_char_p),
 }
 
-_LIB: ctypes.CDLL | None = None
+_LIBS: dict[str, ctypes.CDLL] = {}
+DEFAULT_LIB = "libchewing.so.3"
 
 
-def load_library(name: str = "libchewing.so.3") -> ctypes.CDLL:
-    global _LIB
-    if _LIB is None:
+def load_library(name: str | None = None) -> ctypes.CDLL:
+    """Load (once per path) a libchewing shared library.
+
+    name: a soname resolved by the dynamic loader, or a path to a specific
+    build (for example a libchewing 0.14 install under outputs/). Two
+    different builds should still be used from separate processes, since
+    they export the same symbol names.
+    """
+    name = name or os.environ.get("CHEWING_LIB", DEFAULT_LIB)
+    if name not in _LIBS:
         lib = ctypes.CDLL(name)
         for fn_name, (argtypes, restype) in _SIGNATURES.items():
             fn = getattr(lib, fn_name)
             fn.argtypes = argtypes
             fn.restype = restype
-        _LIB = lib
-    return _LIB
+        _LIBS[name] = lib
+    return _LIBS[name]
 
 
 def _decode(raw: bytes | None) -> str:
@@ -108,8 +116,13 @@ class Chewing:
     directory, so experiments never read or update a real user dictionary.
     """
 
-    def __init__(self, engine: int = CHEWING_CONVERSION_ENGINE, syspath: str | None = None):
-        self.lib = load_library()
+    def __init__(
+        self,
+        engine: int = CHEWING_CONVERSION_ENGINE,
+        syspath: str | None = None,
+        lib_path: str | None = None,
+    ):
+        self.lib = load_library(lib_path)
         syspath = syspath or os.environ.get("CHEWING_PATH", "/opt/libchewing/share/libchewing")
         self._userdir = tempfile.TemporaryDirectory(prefix="chewing-user-")
         userpath = os.path.join(self._userdir.name, "chewing.dat")

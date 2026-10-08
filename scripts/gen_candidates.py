@@ -19,9 +19,13 @@ from zhuyin_rescore.zhuyin import CONDITIONS
 _GEN: CandidateGenerator | None = None
 
 
-def _init(condition: str, pool_size: int, per_list: int, charset: str | None) -> None:
+def _init(
+    condition: str, pool_size: int, per_list: int, charset: str | None, lib: str | None, sys_dir: str | None
+) -> None:
     global _GEN
-    _GEN = CandidateGenerator(condition, pool_size=pool_size, per_list=per_list, charset=charset)
+    _GEN = CandidateGenerator(
+        condition, pool_size=pool_size, per_list=per_list, charset=charset, syspath=sys_dir, lib_path=lib
+    )
 
 
 def _work(item: tuple[dict, str]) -> dict:
@@ -47,6 +51,8 @@ def main() -> None:
     ap.add_argument("--charset", default="cp950", help="filter alternatives by charset; 'none' disables")
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--lib", default=None, help="libchewing shared library path (default: system 0.13.1)")
+    ap.add_argument("--syspath", default=None, help="dictionary dir matching --lib (default: $CHEWING_PATH)")
     args = ap.parse_args()
     charset = None if args.charset == "none" else args.charset
 
@@ -54,9 +60,8 @@ def main() -> None:
         examples = list(read_jsonl(Path(args.data_dir) / f"{split}.jsonl"))[: args.limit]
         for cond in args.conditions:
             t0 = time.time()
-            with mp.Pool(
-                args.workers, initializer=_init, initargs=(cond, args.pool_size, args.per_list, charset)
-            ) as pool:
+            init_args = (cond, args.pool_size, args.per_list, charset, args.lib, args.syspath)
+            with mp.Pool(args.workers, initializer=_init, initargs=init_args) as pool:
                 rows = pool.map(_work, [(ex, cond) for ex in examples], chunksize=16)
             out = Path(args.out_dir) / f"{split}.{cond}.jsonl"
             write_jsonl(out, rows)

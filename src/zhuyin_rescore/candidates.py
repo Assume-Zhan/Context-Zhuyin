@@ -126,13 +126,15 @@ class CandidateGenerator:
         per_list: int = 5,
         charset: str | None = "cp950",
         use_tab: bool = True,
+        syspath: str | None = None,
+        lib_path: str | None = None,
     ):
         self.condition = condition
         self.pool_size = pool_size
         self.per_list = per_list
         self.charset = charset
         self.use_tab = use_tab
-        self.chewing = Chewing(ENGINE_FOR_CONDITION[condition])
+        self.chewing = Chewing(ENGINE_FOR_CONDITION[condition], syspath=syspath, lib_path=lib_path)
         # Frequency order within each candidate list is a better prior for
         # which substitutions to try first.
         self.chewing.set_int("chewing.sort_candidates_by_frequency", 1)
