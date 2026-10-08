@@ -152,11 +152,11 @@ regression.
 
 | config | scoring p50 ms | scoring p95 ms | context cache p50 ms | VRAM MB |
 | --- | --- | --- | --- | --- |
-| Qwen2.5-0.5B-float16-k10 | 19.8 | 20.4 | 15.7 | 1226 |
-| Qwen2.5-0.5B-float16-k30 | 21.5 | 22.6 | 15.8 | 1748 |
-| Qwen2.5-1.5B-float16-k10 | 23.6 | 24.1 | 18.7 | 3236 |
-| Qwen2.5-1.5B-float16-k30 | 24.3 | 25.8 | 18.0 | 3813 |
-| Qwen3-0.6B-Base-float16-k10 | 28.1 | 28.6 | 23.4 | 1524 |
+| Qwen2.5-0.5B-float16-k10 | 19.1 | 20.4 | 15.2 | 1226 |
+| Qwen2.5-0.5B-float16-k30 | 21.2 | 22.4 | 15.7 | 1748 |
+| Qwen2.5-1.5B-float16-k10 | 23.1 | 24.1 | 18.4 | 3236 |
+| Qwen2.5-1.5B-float16-k30 | 24.3 | 25.7 | 18.1 | 3813 |
+| Qwen3-0.6B-Base-float16-k10 | 28.1 | 28.9 | 23.4 | 1524 |
 
 The scoring time is one batched forward over the candidates with the
 context KV cache already resident (built at commit time, "context cache"

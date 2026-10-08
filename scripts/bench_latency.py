@@ -44,7 +44,9 @@ def main() -> None:
         texts = [c["text"] for c in row["candidates"][: args.k]]
         t = time.perf_counter()
         cache = scorer.context_cache(row["context"])
-        torch.cuda.Event(blocking=True).synchronize()
+        ctx_done = torch.cuda.Event(blocking=True)
+        ctx_done.record()
+        ctx_done.synchronize()
         c_ms = (time.perf_counter() - t) * 1000
         start = torch.cuda.Event(enable_timing=True, blocking=True)
         end = torch.cuda.Event(enable_timing=True, blocking=True)
