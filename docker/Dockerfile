@@ -74,9 +74,12 @@ ARG GID=1000
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_BREAK_SYSTEM_PACKAGES=1
 
+# ibus, python3-gi and the IBus typelib let the IME front end run headless
+# end to end tests (tests/test_ibus_e2e.py) inside the container.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential ca-certificates curl git git-lfs htop less \
         libsqlite3-0 locales pkg-config sudo tmux vim wget \
+        dbus ibus python3-gi gir1.2-ibus-1.0 \
     && sed -i 's/^# *\(en_US.UTF-8\)/\1/; s/^# *\(zh_TW.UTF-8\)/\1/' /etc/locale.gen \
     && locale-gen \
     && rm -rf /var/lib/apt/lists/*
