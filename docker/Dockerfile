@@ -38,6 +38,29 @@ RUN git clone --depth 1 --branch ${LIBCHEWING_VERSION} \
     && cp -r /src/libchewing/contrib/python /opt/libchewing/contrib/python
 
 # ---------------------------------------------------------------------------
+# Stage 1b: libchewing 0.14 (bigram LM engine from the architecture RFC),
+# installed side by side with 0.13.1 and loaded by explicit path.
+# ---------------------------------------------------------------------------
+FROM chewing-builder AS chewing014-builder
+
+# ARG values do not carry over between stages; the Rust ENV does.
+ARG LIBCHEWING_REPO=https://codeberg.org/chewing/libchewing.git
+ARG LIBCHEWING14_VERSION=v0.14.0-alpha.4
+
+RUN git clone --depth 1 --branch ${LIBCHEWING14_VERSION} \
+        --recurse-submodules --shallow-submodules \
+        ${LIBCHEWING_REPO} /src/libchewing-0.14 \
+    && cmake -S /src/libchewing-0.14 -B /src/libchewing-0.14/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/opt/libchewing-0.14 \
+        -DBUILD_SHARED_LIBS=ON \
+        -DBUILD_DOC=OFF \
+        -DBUILD_TESTING=OFF \
+        -DWITH_SQLITE3=OFF \
+    && cmake --build /src/libchewing-0.14/build -j"$(nproc)" \
+    && cmake --install /src/libchewing-0.14/build
+
+# ---------------------------------------------------------------------------
 # Stage 2: dev image.
 # ---------------------------------------------------------------------------
 FROM ${BASE_IMAGE} AS dev
@@ -60,6 +83,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # libchewing: shared library, headers, dictionaries, chewing-cli.
 COPY --from=chewing-builder /opt/libchewing /opt/libchewing
+# libchewing 0.14 is not registered with ldconfig; load it by path
+# ($CHEWING14_LIB) so 0.13.1 stays the default libchewing.so.3.
+COPY --from=chewing014-builder /opt/libchewing-0.14 /opt/libchewing-0.14
 RUN echo /opt/libchewing/lib > /etc/ld.so.conf.d/libchewing.conf \
     && if [ -d /opt/libchewing/lib64 ]; then echo /opt/libchewing/lib64 >> /etc/ld.so.conf.d/libchewing.conf; fi \
     && ldconfig
@@ -101,6 +127,8 @@ ENV LANG=en_US.UTF-8 \
     OMP_WAIT_POLICY=PASSIVE \
     MKL_NUM_THREADS=1 \
     CHEWING_PATH=/opt/libchewing/share/libchewing \
+    CHEWING14_LIB=/opt/libchewing-0.14/lib/libchewing.so.3 \
+    CHEWING14_PATH=/opt/libchewing-0.14/share/libchewing \
     PATH=/opt/libchewing/bin:/home/${USERNAME}/.local/bin:${PATH}
 
 USER ${USERNAME}

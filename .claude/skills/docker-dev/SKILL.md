@@ -35,6 +35,10 @@ user unless they asked you to run them.
   adding packages to `docker/requirements.txt`, never add `torch` itself.
 - libchewing is built from source (codeberg tag `LIBCHEWING_VERSION`) into
   `/opt/libchewing`. Dictionaries: `$CHEWING_PATH`.
+- libchewing 0.14 (bigram LM, tag `LIBCHEWING14_VERSION`) is built side by side
+  into `/opt/libchewing-0.14`, not registered with ldconfig. Load it by path:
+  `$CHEWING14_LIB` with dictionaries in `$CHEWING14_PATH`. Containers built
+  before this stage existed can use a local build in `outputs/libchewing-0.14`.
 - Repo is bind mounted at `/workspace`; `PYTHONPATH=/workspace/src`.
 - HF cache is a named volume at `/cache/huggingface` (`HF_HOME`).
 - Container user `dev` gets the host UID and GID from `docker/.env`
