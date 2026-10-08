@@ -18,10 +18,7 @@ def test_fixture_schema():
 
 
 def test_clause_extraction():
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parents[1] / "scripts"))
-    from build_dataset import extract_examples
+    from zhuyin_rescore.textproc import extract_examples
 
     text = "記者林曉慧報導，中職一般棒球賽是在開賽前2小時才會開放觀眾入場。下雨都不會被影響"
     got = list(extract_examples(text, 5, 20, 10))

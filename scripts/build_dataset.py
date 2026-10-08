@@ -14,36 +14,14 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import re
 import time
 from pathlib import Path
 
 import pandas as pd
 from huggingface_hub import hf_hub_download
 
+from zhuyin_rescore.textproc import extract_examples
 from zhuyin_rescore.zhuyin import CONDITIONS, derive_condition, normalize
-
-HAN = "㐀-䶿一-鿿"
-CLAUSE_DELIMS = re.compile(r"[，。！？；：、,.!?;:\n\r\t「」『』（）()《》〈〉【】\[\]\"'“”‘’…—～~|/／\s]+")
-PURE_HAN = re.compile(f"^[{HAN}]+$")
-
-
-def iter_clauses(text: str):
-    """Yield (start, clause) for every delimiter separated span."""
-    pos = 0
-    for m in CLAUSE_DELIMS.finditer(text):
-        if m.start() > pos:
-            yield pos, text[pos : m.start()]
-        pos = m.end()
-    if pos < len(text):
-        yield pos, text[pos:]
-
-
-def extract_examples(text: str, min_len: int, max_len: int, context_chars: int):
-    for start, clause in iter_clauses(text):
-        if min_len <= len(clause) <= max_len and PURE_HAN.match(clause):
-            context = text[max(0, start - context_chars) : start].lstrip()
-            yield clause, context
 
 
 def main() -> None:
