@@ -50,6 +50,15 @@ class LMScorer:
         pad = self.tokenizer.pad_token_id
         self.pad_id = pad if pad is not None else self.start_id
 
+    def quantize_dynamic_int8(self) -> None:
+        """Replace Linear layers with int8 dynamic quantized ones (CPU only)."""
+        if self.device.type != "cpu":
+            raise ValueError("dynamic int8 quantization runs on the CPU")
+        quantize = torch.ao.quantization.quantize_dynamic
+        self.model = quantize(self.model.float(), {torch.nn.Linear}, dtype=torch.qint8)
+        self.decoder = self.model.get_decoder()
+        self.lm_head = self.model.get_output_embeddings()
+
     def encode(self, text: str) -> list[int]:
         return self.tokenizer(text, add_special_tokens=False)["input_ids"]
 
