@@ -1,0 +1,19 @@
+[project]
+name = "zhuyin-rescore"
+version = "0.1.0"
+description = "Zhuyin candidate selection: libchewing top-k plus small LM rescoring"
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# Chinese punctuation and zhuyin appear in data literals on purpose.
+ignore = ["RUF001", "RUF003"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
