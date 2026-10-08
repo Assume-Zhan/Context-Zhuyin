@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<component>
+  <name>org.freedesktop.IBus.ZhuyinLM</name>
+  <description>Zhuyin input with n-gram decoding and LM reranking</description>
+  <exec>@EXEC@</exec>
+  <version>0.1</version>
+  <author>Phonetic-Symbols-Candidate</author>
+  <license>Apache-2.0</license>
+  <homepage></homepage>
+  <textdomain></textdomain>
+  <engines>
+    <engine>
+      <name>zhuyin-lm</name>
+      <language>zh_TW</language>
+      <license>Apache-2.0</license>
+      <author>Phonetic-Symbols-Candidate</author>
+      <icon></icon>
+      <layout>us</layout>
+      <longname>Zhuyin LM</longname>
+      <description>Zhuyin with n-gram decoding and LM reranking</description>
+      <rank>0</rank>
+      <symbol>ZY</symbol>
+    </engine>
+  </engines>
+</component>
