@@ -16,10 +16,10 @@ zh-TW Wikipedia articles, Common Voice), relative to **libchewing 0.14**:
 | + Qwen2.5-0.5B base reranking the merged pool | 2.13% (-56%) | 6.30% (-62%) | 52.12% (-24%) | GPU |
 | + Qwen2.5-0.5B zh-TW reranking the merged pool | **1.57% (-68%)** | **5.12% (-69%)** | **49.59% (-28%)** | GPU, 7.5 ms per call with a CUDA graph |
 
-- Continued pretraining on 300M tokens of zh-TW text cuts the reranked
-  character errors by another 26% on toned input (95% CI 23% to 30%), and
-  helps on every domain, including Common Voice, which no model trained on
-  (full 2.15% -> 1.57%).
+- Continued pretraining on 300M tokens of zh-TW text cuts the character
+  errors of the merged pool reranker by another 26% on toned input (95% CI
+  23% to 30%; 9 to 19% for the 10-best pools), and helps on every domain,
+  including Common Voice, which no model trained on (full 2.15% -> 1.57%).
 - The decoder's own gain on toned input depends on its training data
   covering the domain; on toneless input it is robust (see below).
 - A 0.5B reranker is not usable on the CPU: 0.24 to 1.4 s per call on this
