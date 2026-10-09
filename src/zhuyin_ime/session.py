@@ -126,9 +126,11 @@ class Session:
             st.page, st.pages = self.cand_page, pages
         return st
 
-    def _commit_all(self, extra: str = "") -> str:
+    def _commit_all(self, extra: str = "", boundary: str = "") -> str:
+        """Commit the preedit plus extra; boundary is recorded in the history
+        only (Enter ends a line or message, so the next clause starts fresh)."""
         text = (self._text() if self.syllables else "") + extra
-        self.history = (self.history + text)[-HISTORY_CHARS:]
+        self.history = (self.history + text + boundary)[-HISTORY_CHARS:]
         self.syllables, self.locks, self.cursor = [], {}, 0
         self.composer.clear()
         self.cand_items = []
@@ -205,7 +207,7 @@ class Session:
         if name == "Return":
             if not self._busy():
                 return State(handled=False, version=self.version)
-            return self._state(commit=self._commit_all())
+            return self._state(commit=self._commit_all(boundary="\n"))
         if name == "BackSpace":
             return self._backspace()
         if name == "Delete":

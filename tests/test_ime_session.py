@@ -63,7 +63,7 @@ def test_typing_and_commit(engine):
     assert st.preedit == "我明天再去學校"
     st = s.process_key(Key(name="Return"))
     assert st.commit == "我明天再去學校" and st.preedit == ""
-    assert s.history.endswith("我明天再去學校")
+    assert s.history.endswith("我明天再去學校\n")
 
 
 def test_toneless_typing(engine):
