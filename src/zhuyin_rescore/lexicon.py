@@ -12,6 +12,7 @@ import csv
 import math
 import os
 import subprocess
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,11 +51,12 @@ def load_entries(cache_dir: str | Path = "outputs/dict", syspath: str | None = N
                 if len(syls) != len(phrase):
                     continue
                 try:
-                    full = tuple(normalize(s) for s in syls)
+                    # Interned: a few thousand distinct syllables shared by 160k entries.
+                    full = tuple(sys.intern(normalize(s)) for s in syls)
                     freq_i = int(freq)
                 except ValueError:
                     continue
-                key = (phrase, full)
+                key = (sys.intern(phrase), full)
                 best[key] = max(best.get(key, 0), freq_i)
     return [Entry(p, r, f) for (p, r), f in best.items()]
 
@@ -80,7 +82,7 @@ class Lexicon:
                 continue
             if charset == "cp950" and not cp950_ok(e.phrase):
                 continue
-            key = tuple(derive_condition(list(e.full), key_condition))
+            key = tuple(sys.intern(x) for x in derive_condition(list(e.full), key_condition))
             bucket = index[key]
             bucket[e.phrase] = max(bucket.get(e.phrase, 0), e.freq)
             self.full_readings[e.phrase].add(e.full)
@@ -114,7 +116,7 @@ class Lexicon:
                 (p, f) for p, f in hits if any(self._reading_ok(r, syllables) for r in self.full_readings[p])
             ]
         hits = hits[:limit] if limit else hits
-        if len(self._span_cache) > 200_000:
+        if len(self._span_cache) > 20_000:
             self._span_cache.clear()
         self._span_cache[cache_key] = hits
         return hits
