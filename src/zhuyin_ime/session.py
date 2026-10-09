@@ -64,7 +64,7 @@ class Engine:
         weights: Weights | None = None,
         beam: int = 32,
         k: int = 10,
-        fusion: tuple[float, float] = (0.05, 2.0),
+        fusion: tuple[float, float, float] = (0.05, 2.0, 0.05),
     ):
         if lexicon.condition != "mixed":
             raise ValueError("the IME needs a lexicon built with condition='mixed'")
@@ -305,10 +305,10 @@ class Session:
         """Fuse LM scores with the decoder's n-gram scores; None if stale."""
         if version != self.version or len(lm_scores) != len(self.kbest):
             return None
-        a, beta = self.engine.fusion
+        a, beta, mu = self.engine.fusion
         best, best_s = None, float("-inf")
         for i, (d, lm) in enumerate(zip(self.kbest, lm_scores, strict=True)):
-            s = lm + a * d.feats[0] - beta * (i > 0)
+            s = lm + a * d.feats[0] - beta * (i > 0) - mu * i
             if s > best_s:
                 best, best_s = d.text, s
         if best == self._text():

@@ -159,7 +159,9 @@ def serve(socket_path: str, engine: Engine, reranker: Reranker | None = None, re
         threading.Thread(target=c.serve, daemon=True).start()
 
 
-def build_engine(ngram: str, dict_dir: str, beam: int, fusion: tuple[float, float] = (0.05, 2.0)) -> Engine:
+def build_engine(
+    ngram: str, dict_dir: str, beam: int, fusion: tuple[float, float, float] = (0.05, 2.0, 0.05)
+) -> Engine:
     from zhuyin_rescore.lexicon import Lexicon, load_entries
     from zhuyin_rescore.ngram import CharNgram
 
@@ -216,15 +218,18 @@ def main() -> None:
     ap.add_argument("--normalizer", default="full", choices=["homophone", "full"], help="charlm only")
     ap.add_argument("--int8", action="store_true", help="charlm only: int8 dynamic quantization")
     ap.add_argument("--debounce-ms", type=float, default=100.0)
-    # Fusion score = lm + a * ngram - beta * [not the decoder 1-best]; tuned on
-    # dev for the zh-TW model (use about a=0.75 with the base Qwen model).
-    ap.add_argument("--fusion-a", type=float, default=0.05)
+    # Fusion score = lm + a * ngram - beta * [not the decoder 1-best] - mu * rank,
+    # the same form as the evaluation; defaults are the dev tuned weights of the
+    # zh-TW Qwen model on the decoder 10-best (char LM 16M: 0.3, 1.0, 0.1).
+    ap.add_argument("--fusion-a", type=float, default=0.0)
     ap.add_argument("--fusion-beta", type=float, default=2.0)
+    ap.add_argument("--fusion-mu", type=float, default=0.05)
     ap.add_argument("--nice", type=int, default=5, help="lower the process priority")
     args = ap.parse_args()
 
     os.nice(args.nice)
-    engine = build_engine(args.ngram, args.dict_dir, args.beam, (args.fusion_a, args.fusion_beta))
+    fusion = (args.fusion_a, args.fusion_beta, args.fusion_mu)
+    engine = build_engine(args.ngram, args.dict_dir, args.beam, fusion)
     reranker = None
     if args.reranker and args.reranker_type == "charlm":
         scorer = build_charlm_scorer(args.reranker, engine, args.threads, args.int8)

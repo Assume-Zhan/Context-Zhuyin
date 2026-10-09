@@ -41,16 +41,16 @@ python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw --graph  # p
 ```
 
 `--graph` replays the reranker as a CUDA graph (7.5 ms per call instead of
-20 ms on the RTX 5090). The default fusion weights (`--fusion-a 0.05
---fusion-beta 2`) are tuned for the zh-TW model; use about `--fusion-a 0.75`
-with the base Qwen model.
+20 ms on the RTX 5090). The default fusion weights (`--fusion-a 0 --fusion-beta 2
+--fusion-mu 0.05`) are the dev tuned ones for the zh-TW Qwen model on the
+decoder 10-best.
 
 CPU only (no GPU), with the 16M character LM reranker
 ([results-cpu-reranker.md](results-cpu-reranker.md)):
 
 ```bash
 python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8 \
-    --fusion-a 0.3 --fusion-beta 1.0
+    --fusion-a 0.3 --fusion-beta 1.0 --fusion-mu 0.1
 ```
 
 Measured by typing 200 Common Voice dev sentences through the server
@@ -59,8 +59,10 @@ Measured by typing 200 Common Voice dev sentences through the server
 | server | key latency p95 | sentences correct, with tones | toneless |
 | --- | --- | --- | --- |
 | decoder only (CPU) | 2.9 ms | 80.0% | 72.0% |
-| + char LM 16M int8 reranker (CPU, 1 thread) | 5.4 ms | 83.0% | 75.0% |
-| + Qwen2.5-0.5B zh-TW reranker, CUDA graph (RTX 5090) | 5.5 ms | 83.5% | 76.0% |
+| + char LM 16M int8 reranker (CPU, 1 thread) | 5.5 ms | 82.5% | 75.5% |
+| + Qwen2.5-0.5B zh-TW reranker, CUDA graph (RTX 5090) | 5.5 ms | 83.0% | 76.0% |
+
+200 sentences: standard error about 2.8 points.
 
 The reranker runs in its own thread and pushes its result about 100 ms
 (debounce) after the last syllable, so keystrokes never wait for it. Enter
