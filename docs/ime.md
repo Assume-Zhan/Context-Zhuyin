@@ -41,7 +41,10 @@ python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw --graph  # p
 ```
 
 `--graph` replays the reranker as a CUDA graph (7.5 ms per call instead of
-20 ms on the RTX 5090). The default fusion weights (`--fusion-a 0 --fusion-beta 2
+20 ms on the RTX 5090). On an RTX 3060 it is slower (31 ms instead of 18 ms
+eager, 10 candidates): the graph pads every call to 16 candidates of 24
+tokens, which costs that GPU more compute than the kernel launches save, so
+leave it off there. The default fusion weights (`--fusion-a 0 --fusion-beta 2
 --fusion-mu 0.05`) are the dev tuned ones for the zh-TW Qwen model on the
 decoder 10-best.
 
@@ -91,14 +94,24 @@ desktop input source settings and ibus-daemon starts it on demand.
 | bopomofo keys | compose a syllable; a symbol of a filled slot replaces it |
 | `6` `3` `4` `7` | finish the syllable with tone 2, 3, 4, neutral |
 | Space | finish the syllable without a tone (matches any tone); with nothing being composed, open the candidate window |
-| Down | open the candidate window at the cursor (at the end: phrases ending there) |
+| Down | open the candidate window at the cursor (at the end: phrases ending there, before any trailing punctuation) |
 | `1` to `9` | pick a candidate; the choice is locked for later conversions |
-| Space, Down / Up, Page keys | next / previous candidate page |
+| Down / Up (window open) | move the highlight; past the last or first item, turn the page |
+| Enter (window open) | pick the highlighted candidate |
+| Space, Page Down / Page Up | next / previous candidate page |
 | Enter | commit the preedit |
 | BackSpace / Delete | delete a symbol or a syllable |
 | Left / Right / Home / End | move the cursor between syllables |
 | Esc | close the candidate window, drop the syllable being composed, or clear |
-| Shift + `,` `.` `/` `1` `;` and `[` `]` `'` `\` | full width punctuation, commits first |
+| Shift + `,` `.` `/` `1` `;` and `[` `]` `'` `\` | full width punctuation |
+| Ctrl + `,` `.` `;` (and Ctrl with the keys above) | full width comma, period, semicolon (and the same as above) |
+
+Punctuation goes into the preedit like a syllable and is committed with it
+on Enter, so phrases before it can still be picked. It splits the input
+into segments that are decoded separately, each with the text before it as
+context; the reranker scores the segments in order, and a segment keeps its
+reranked choice while typing continues after it. A syllable still being
+composed when punctuation is typed is finished without a tone.
 
 Committed text becomes the context for the next conversion (the n-gram sees
 its tail, the reranker the last 64 tokens).

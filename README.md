@@ -111,6 +111,23 @@ reranker additionally needs a CPU build of PyTorch):
 PYTHONPATH=src python3 -m zhuyin_ime.server
 ```
 
+The GPU reranker also runs on the host, which avoids the container's CUDA 13
+requirement (NVIDIA driver 580 or newer): a PyTorch CUDA 12.x build also runs
+on older 12.x drivers through CUDA minor version compatibility (tested:
+driver 550, torch 2.9.0+cu128, RTX 3060). With
+PyTorch already installed for the system Python, add the rest in a venv
+that sees it:
+
+```bash
+python3 -m venv --system-site-packages .venv
+.venv/bin/pip install -U pip
+.venv/bin/pip install transformers==5.19.0 "pillow>=10"   # Ubuntu 22.04 ships a too old Pillow
+TOKENIZERS_PARALLELISM=false PYTHONPATH=src .venv/bin/python -m zhuyin_ime.server \
+    --reranker outputs/lm/qwen2.5-0.5b-zhtw
+```
+
+Leave out `--graph` on smaller GPUs; see [docs/ime.md](docs/ime.md).
+
 The server lowers its own priority (`--nice 5`) and sleeps when idle.
 
 ### 4. Install the IBus front end (on the host)
@@ -139,9 +156,12 @@ and add "Zhuyin LM" under Settings > Keyboard > Input Sources (Chinese
 
 Dai Chien (standard) layout. Finish each syllable with a tone key
 (`6` `3` `4` `7`) or with Space to leave the tone open; the sentence is
-converted as you type. Down opens the candidate window, `1` to `9` pick (the
-choice is kept), Enter commits, Shift+`,` and Shift+`.` type full width
-punctuation. The full key table is in [docs/ime.md](docs/ime.md).
+converted as you type. Down opens the candidate window; Up and Down move the
+highlight and Enter picks it, or `1` to `9` pick directly (the choice is
+kept). Enter commits. Shift+`,` and Shift+`.`, or Ctrl+`,` and Ctrl+`.`, type
+full width punctuation, which stays in the preedit until Enter, so you can
+still pick phrases before it. The full key table is in
+[docs/ime.md](docs/ime.md).
 
 ### Troubleshooting
 
