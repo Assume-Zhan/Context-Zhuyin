@@ -115,10 +115,19 @@ def test_rerank_applies_only_to_current_version(engine):
     req = s.rerank_request()
     assert req is not None
     version, _, kbest, syllables = req
-    assert len(syllables) == 3
-    scores = [0.0] * len(kbest)
-    scores[1] = 1000.0  # force the second candidate
-    st = s.apply_rerank(version, scores)
+    assert len(syllables) == 3 and len(kbest) > 10  # the decoder now keeps a deep list
+    st = s.apply_choice(version, kbest[1].text)
     assert st is not None and st.preedit == kbest[1].text
     type_keys(s, "y9 ")
-    assert s.apply_rerank(version, scores) is None  # stale
+    assert s.apply_choice(version, kbest[1].text) is None  # stale
+
+
+def test_pool_policy():
+    from zhuyin_ime.pool import OPEN, TONED, PoolBuilder, typed_with_tones
+
+    assert typed_with_tones(["ㄨㄛˇ", "ㄇㄧㄥˊ", "ㄊㄧㄢ"])
+    assert not typed_with_tones(["ㄨㄛ", "ㄇㄧㄥ", "ㄊㄧㄢ"])
+    texts = [f"t{i}" for i in range(40)]
+    builder = PoolBuilder()
+    assert builder.build(texts, ["ㄨㄛ", "ㄇㄧㄥ"]) == (OPEN, texts[:30])
+    assert builder.build(texts, ["ㄨㄛˇ", "ㄇㄧㄥˊ"]) == (TONED, texts[:30])

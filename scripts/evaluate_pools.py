@@ -55,6 +55,13 @@ def compose(policy: str, src: dict[str, dict], k: int) -> list[str]:
     elif policy == "c14+beam4":
         c14 = src["chewing-0.14"]
         seq = [c14["onebest"]] + c14["tab"][1:] + source_list(src["beam-o4"]) + source_list(c14)
+    elif policy == "b4+c14tab":
+        # Decoder 10-best first (its 1-best stays first), then libchewing's n-best.
+        c14 = src["chewing-0.14"]
+        seq = source_list(src["beam-o4"])[:10] + [c14["onebest"]] + c14["tab"][1:]
+    elif policy == "b4+c14":
+        # Decoder 10-best first, then libchewing's n-best and substitutions.
+        seq = source_list(src["beam-o4"])[:10] + source_list(src["chewing-0.14"])
     elif policy == "beam4+c14":
         seq = source_list(src["beam-o4"])[:1] + [src["chewing-0.14"]["onebest"]]
         seq += source_list(src["beam-o4"])[1:] + source_list(src["chewing-0.14"])

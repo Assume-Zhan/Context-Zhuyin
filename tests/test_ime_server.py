@@ -29,7 +29,7 @@ def server(tmp_path_factory):
     path = str(tmp_path_factory.mktemp("ime") / "ime.sock")
     engine = build_engine(str(NGRAM), "outputs/dict", beam=32)
     ready = threading.Event()
-    reranker = Reranker(PreferSecond(), debounce_ms=20)
+    reranker = Reranker(PreferSecond(), engine, debounce_ms=20)
     threading.Thread(target=serve, args=(path, engine, reranker, ready), daemon=True).start()
     assert ready.wait(30)
     return path

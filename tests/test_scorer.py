@@ -69,6 +69,6 @@ def test_graph_scorer_matches_eager():
         ref = s16.score_cached(context, CANDS)
         assert g.score(context, CANDS) == pytest.approx(ref, abs=0.1)
     # A request larger than the static shapes falls back to the eager path.
-    many = CANDS * 5
+    many = CANDS * 9  # 36 candidates, more than the 32 the graph holds
     assert g.score(CONTEXT, many) == pytest.approx(s16.score_cached(CONTEXT, many), abs=1e-6)
     assert g.fallbacks == 1

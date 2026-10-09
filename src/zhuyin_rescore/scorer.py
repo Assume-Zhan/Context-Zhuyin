@@ -111,10 +111,18 @@ class LMScorer:
 
     @torch.inference_mode()
     def context_cache(self, context: str) -> tuple[DynamicCache, torch.Tensor, int]:
-        """Run the prefix once; return its cache, last hidden state, length."""
+        """Run the prefix once; return its cache, last hidden state, length.
+
+        The last context is memoized: committed text changes rarely, and
+        score_cached never modifies the cache (it extends a copy).
+        """
+        if getattr(self, "_ctx_key", None) == context:
+            return self._ctx_cache
         prefix = torch.tensor([self.prefix_ids(context)], device=self.device)
         out = self.decoder(input_ids=prefix, use_cache=True)
-        return out.past_key_values, out.last_hidden_state[:, -1:], prefix.shape[1]
+        cache = (out.past_key_values, out.last_hidden_state[:, -1:], prefix.shape[1])
+        self._ctx_key, self._ctx_cache = context, cache
+        return cache
 
     @torch.inference_mode()
     def score_cached(self, context: str, candidates: list[str], cache=None) -> list[float]:

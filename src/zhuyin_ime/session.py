@@ -5,7 +5,7 @@ the cursor, the phrases the user picked (locked spans), the candidate window
 and the committed history used as LM context. After every change it decodes
 incrementally with the beam decoder and shows the 1-best right away; an
 optional LM reranker can later replace the preedit with a better candidate
-(apply_rerank), as long as the input has not changed in the meantime.
+(apply_choice), as long as the input has not changed in the meantime.
 """
 
 from __future__ import annotations
@@ -63,8 +63,7 @@ class Engine:
         ngram: CharNgram,
         weights: Weights | None = None,
         beam: int = 32,
-        k: int = 10,
-        fusion: tuple[float, float, float] = (0.05, 2.0, 0.05),
+        k: int = 30,
     ):
         if lexicon.condition != "mixed":
             raise ValueError("the IME needs a lexicon built with condition='mixed'")
@@ -73,7 +72,6 @@ class Engine:
         self.weights = weights or Weights(prior=0.3, edge=-1.0, mismatch=-3.0)
         self.beam = beam
         self.k = k
-        self.fusion = fusion
 
     def valid_syllable(self, syllable: str) -> bool:
         return bool(self.lexicon.lookup_span((syllable,), 1))
@@ -301,17 +299,9 @@ class Session:
             return None
         return self.version, self.history[-HISTORY_CHARS:], list(self.kbest), list(self.syllables)
 
-    def apply_rerank(self, version: int, lm_scores: list[float]) -> State | None:
-        """Fuse LM scores with the decoder's n-gram scores; None if stale."""
-        if version != self.version or len(lm_scores) != len(self.kbest):
+    def apply_choice(self, version: int, text: str) -> State | None:
+        """Show the reranker's choice if the input is unchanged; None if stale."""
+        if version != self.version or len(text) != len(self.syllables) or text == self._text():
             return None
-        a, beta, mu = self.engine.fusion
-        best, best_s = None, float("-inf")
-        for i, (d, lm) in enumerate(zip(self.kbest, lm_scores, strict=True)):
-            s = lm + a * d.feats[0] - beta * (i > 0) - mu * i
-            if s > best_s:
-                best, best_s = d.text, s
-        if best == self._text():
-            return None
-        self.reranked = best
+        self.reranked = text
         return self._state()

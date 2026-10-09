@@ -55,6 +55,7 @@ def main() -> None:
                 client.take_pushes()
             st = client.key(name="Return")
             ok += st["commit"] == r["text"]
+        stats = client.request("stats").get("reranker")
         lat = np.array(lat)
         print(
             json.dumps(
@@ -65,6 +66,7 @@ def main() -> None:
                     "p95_ms": round(float(np.percentile(lat, 95)), 2),
                     "max_ms": round(float(lat.max()), 2),
                     "sentence_acc": round(ok / len(rows), 3),
+                    "reranker": stats,
                 }
             )
         )

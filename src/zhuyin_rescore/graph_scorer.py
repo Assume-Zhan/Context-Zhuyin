@@ -4,7 +4,7 @@ The eager scorer spends most of its 20 ms launching the ~550 kernels of a
 24 layer forward, not computing. This scorer runs the same Qwen2 forward
 (RMSNorm, rotary, grouped query attention against the resident context KV
 cache, SwiGLU) as plain tensor code on the model's own weights, with every
-shape fixed: candidates padded to k_max x w_max tokens, the context padded
+shape fixed: candidates padded to k_max x w_max tokens (32 x 24), the context padded
 to p_max and masked by its true length held in a device tensor. Fixed shapes
 let it be captured once as a CUDA graph and replayed per request.
 
@@ -20,7 +20,7 @@ from zhuyin_rescore.scorer import LMScorer
 
 
 class GraphScorer:
-    def __init__(self, scorer: LMScorer, k_max: int = 16, w_max: int = 24, p_max: int = 72):
+    def __init__(self, scorer: LMScorer, k_max: int = 32, w_max: int = 24, p_max: int = 72):
         if scorer.device.type != "cuda":
             raise ValueError("GraphScorer needs a CUDA device")
         self.scorer = scorer
