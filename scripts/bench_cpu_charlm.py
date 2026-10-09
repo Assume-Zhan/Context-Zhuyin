@@ -27,6 +27,7 @@ def main() -> None:
     ap.add_argument("--threads", nargs="+", type=int, default=[1, 2])
     ap.add_argument("--out", default="outputs/bench/cpu_charlm.json")
     ap.add_argument("--int8", action="store_true", help="also time int8 dynamic quantization")
+    ap.add_argument("--onnx", action="store_true", help="also time ONNX Runtime, fp32 and int8 (1 thread)")
     ap.add_argument("--variants", nargs="+", default=["full", "homophone"])
     args = ap.parse_args()
 
@@ -41,17 +42,25 @@ def main() -> None:
     rows = [json.loads(line) for line in open(args.candidates)][: args.requests]
     rows = [r for r in rows if len(r["beam"]) >= 2]
     report = {"runs": []}
-    jobs = [(path, False) for path in args.models]
+    jobs = [(path, "fp32") for path in args.models]
     if args.int8:
-        jobs += [(path, True) for path in args.models]
+        jobs += [(path, "int8") for path in args.models]
+    if args.onnx:
+        jobs += [(path, m) for path in args.models for m in ("onnx", "onnx-int8")]
     reference: dict[str, list[int]] = {}
-    for path, int8 in jobs:
+    for path, mode in jobs:
         scorer = CharLMScorer(path, device="cpu", homophones=homophones)
         params = sum(p.numel() for p in scorer.model.parameters())
-        if int8:
+        if mode == "int8":
             scorer.quantize_dynamic_int8()
-        for variant in args.variants:
-            for threads in args.threads:
+        if mode.startswith("onnx"):
+            from zhuyin_rescore.charlm_ort import OrtCharLMScorer
+
+            scorer = OrtCharLMScorer(path, int8=mode == "onnx-int8")
+        torch_only = mode in ("fp32", "int8")
+        variants = args.variants if torch_only else ["full"]
+        for variant in variants:
+            for threads in args.threads if torch_only else [1]:
                 torch.set_num_threads(threads)
                 lat, cpu, best = [], [], []
                 for i, r in enumerate(rows):
@@ -74,7 +83,7 @@ def main() -> None:
                 run = {
                     "model": path,
                     "params_m": round(params / 1e6, 2),
-                    "int8": int8,
+                    "mode": mode,
                     "variant": variant,
                     "best_agrees_with_fp32": round(agree, 4),
                     "threads": threads,

@@ -76,9 +76,9 @@ def main() -> None:
     ap.add_argument("--out-root", default="outputs/scores")
     ap.add_argument("--no-lm", action="store_true", help="only compute the n-gram feature")
     ap.add_argument("--chunk", type=int, default=32, help="candidates per forward, bounds GPU memory")
-    ap.add_argument("--scorer", default="qwen", choices=["qwen", "charlm"])
+    ap.add_argument("--scorer", default="qwen", choices=["qwen", "charlm", "charlm-onnx"])
     ap.add_argument("--device", default="cuda")
-    ap.add_argument("--int8", action="store_true", help="charlm on the CPU: int8 dynamic quantization")
+    ap.add_argument("--int8", action="store_true", help="charlm on the CPU / charlm-onnx: int8 quantization")
     ap.add_argument("--threads", type=int, default=1, help="torch CPU threads")
     args = ap.parse_args()
     tag = args.tag or f"{args.model.rstrip('/').split('/')[-1]}-{args.dtype}"
@@ -98,6 +98,10 @@ def main() -> None:
         for cond in args.conditions:
             lex = Lexicon(entries, cond)
             homophone_fns[cond] = lambda syl, lex=lex: [p for p, _ in lex.lookup_span((syl,))]
+    elif args.scorer == "charlm-onnx":
+        from zhuyin_rescore.charlm_ort import OrtCharLMScorer
+
+        scorer = OrtCharLMScorer(args.model, int8=args.int8, threads=args.threads)
     else:
         scorer = LMScorer(args.model, dtype=args.dtype, device=args.device)
     empty_cache = scorer.context_cache("") if scorer is not None else None

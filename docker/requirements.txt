@@ -6,6 +6,8 @@ accelerate
 safetensors
 sentencepiece
 huggingface_hub
+# export of the CPU reranker to ONNX Runtime (onnxruntime is listed below)
+onnx
 
 # Data pipeline: hanzi to zhuyin, script conversion
 g2pw
