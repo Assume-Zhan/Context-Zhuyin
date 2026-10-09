@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -188,7 +189,10 @@ class CharLMScorer:
         The tied embedding and output projection stay in fp32.
         """
         quantize = torch.ao.quantization.quantize_dynamic
-        self.model = quantize(self.model, {nn.Linear}, dtype=torch.qint8)
+        with warnings.catch_warnings():
+            # torch.ao quantized tensor creation is deprecated upstream but works.
+            warnings.simplefilter("ignore", UserWarning)
+            self.model = quantize(self.model, {nn.Linear}, dtype=torch.qint8)
         self._ctx_key, self._ctx_cache = None, None
 
     def context_ids(self, context: str) -> list[int]:

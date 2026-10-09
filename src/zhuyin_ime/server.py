@@ -99,6 +99,12 @@ class Reranker:
         return kind, texts[fuse(lm, ngram, self.fusion[kind])]
 
     def _run(self) -> None:
+        # One throw away call so the first real rerank does not pay for lazy
+        # initialization (CUDA graph capture, int8 kernels, allocator warm up).
+        try:
+            self.scorer.score_cached("", ["我們", "我門"])
+        except Exception as exc:
+            print(f"reranker warm up error: {exc}", flush=True)
         while True:
             with self.cond:
                 warm, self.warm_context = self.warm_context, None
