@@ -141,6 +141,74 @@ python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type char
 [ime.md](ime.md#candidate-pool); the pool also grew since this
 measurement, which moves the IME numbers to 82.5% / 77.0%.)
 
+## Discriminative fine-tuning on candidate pools (no gain)
+
+Can the 16M model learn to pick the correct sentence from the pool directly,
+instead of scoring candidates as a plain LM? Short answer: not measurably.
+
+**Data.** 60,002 training and 3,001 dev clauses (5 to 20 characters, about
+15k per source), sampled from news, wiki, PTT and web documents that come
+after the n-gram's 150M character cut in each training file, so neither the
+n-gram nor the LMs saw them. g2pW readings, 80 characters of preceding
+context, 15% of contexts blanked. Pools are composed exactly as evaluated and
+as the IME builds them, with the evaluation's decoder weights: typed with
+tones, the decoder's 10-best plus libchewing 0.14's n-best (at most 20);
+toneless, the decoder's 30-best. The correct sentence is in the pool for
+96.4% (toned) and 84.7% (toneless) of the training clauses; the decoder's
+1-best is correct for 81.8% / 67.8%.
+
+**Loss** (`src/zhuyin_rescore/listwise.py`, `scripts/train_rerank.py`). The
+candidate score is the inference score: full softmax log P(candidate |
+context), computed as one batched forward over [BOS, context, candidate]
+rows (a test checks it equals `CharLMScorer.score_cached` within 1e-3), fused
+with the 4-gram, first-position bonus and rank penalty. Per pool: expected
+normalized error under the pool softmax (MWER), cross entropy on the correct
+sentence when the pool has it, and an LM anchor (NLL per character of the
+correct sentence). A learned per pool scale on the softmax absorbs pressure
+to change the network's temperature. Fusion weights frozen at the preset.
+
+**Dev runs** (dev CER, mean of toned and toneless, with the best fusion on
+a grid as in `evaluate_pools.py`; NLL of the correct sentence in nats per
+character):
+
+| run | dev CER | NLL |
+| --- | --- | --- |
+| base char LM 16M | 3.53% | 3.631 |
+| LM fine-tuning only on the training clauses (control, 0.15 epoch) | 3.53% | 3.535 |
+| anchor 0.1, no scale, lr 1e-4, learned fusion (stopped at step 1000) | 3.74% (1) | 3.961 |
+| anchor 1, scale, lr 3e-5, 2 epochs (kept) | 3.50% | 3.584 |
+| same, lr 1e-4, learned fusion (stopped at step 1500) | 3.58% | 3.637 |
+
+(1) with its learned fusion; the base scores 3.56% with the preset fusion.
+
+The first configuration degraded the LM: with no free scale the pool loss
+moves the network's own temperature, which raises its NLL and does not change
+any argmax. The learned scale stayed below 1 (0.5 to 0.6 during the first
+epoch, 0.8 at the end), i.e. the base model's margins between candidates are
+too wide for the pool softmax, not too narrow.
+
+**Test** (five domains, kept checkpoint vs base, same pools, fusion tuned on
+the dev sets for each; 95% CI from a paired bootstrap over sentences):
+
+| pool | base | tuned | change, 95% CI | fixed / broken sentences |
+| --- | --- | --- | --- | --- |
+| toned: decoder 10-best + libchewing n-best, at most 20 | 2.17% | 2.16% | -0.01 [-0.08, +0.05] | 71 / 55 |
+| toneless: decoder 30-best | 5.69% | 5.69% | 0.00 [-0.08, +0.08] | 64 / 63 |
+
+Per domain the changes go both ways (toned: web 1.96% -> 1.86% and wiki
+2.34% -> 2.25%, Common Voice 1.97% -> 2.08%). The model is not deployed.
+
+**Why there is little to gain.** On the dev pools, of the base model's
+2.03% toned CER only 1.23% comes from pools that contain the correct
+sentence; 0.79% comes from pools that do not. Toneless: 1.35% of 5.10%
+is fixable by reranking, 3.75% is the pool. Among the wrong picks with the
+correct sentence in the pool, the fused score prefers the wrong one by a
+median of about 3 nats, and a sample of them is dominated by cases context
+cannot decide: two accepted spellings of the same word (variant characters
+for "what", "self-made", "need", "to order"), he vs she (same reading), and
+names. What is left after that is small relative to the noise of 60k
+training pools.
+
 ## Next steps
 
 - Widen the IME pool (decoder k = 20, or merge libchewing 0.14's n-best;
@@ -148,9 +216,8 @@ measurement, which moves the IME numbers to 82.5% / 77.0%.)
   1.00% toned and 3.48% toneless CER is the Oracle@10 floor, sentences whose
   correct form is not in the decoder 10-best at all, which no reranker can
   fix. Toneless input is mostly pool limited.
-- Discriminative fine-tuning on decoder pools (listwise loss against the
-  gold sentence) for the part that is in the pool but not picked: 2.48% vs
-  1.00% toned and 5.77% vs 3.48% toneless for the 16M model.
+- Discriminative fine-tuning on the pools: tried, no measurable gain (see
+  above). The pool is the larger lever, especially toneless.
 - Distillation from the zh-TW Qwen reranker.
 - Measure on the i5-14500 and under the replayed typing load.
 
@@ -166,4 +233,20 @@ python scripts/evaluate_pools.py --tag charlm-small --lm-field lm_homo
 OMP_NUM_THREADS=1 python scripts/bench_cpu_charlm.py --models outputs/charlm/small --int8 --variants full
 CUDA_VISIBLE_DEVICES="" python scripts/bench_ime_keys.py --settle-ms 400 \
     --server-args "--reranker outputs/charlm/small --reranker-type charlm --int8"
+
+# Discriminative fine-tuning (no gain, see above)
+python scripts/build_rerank_train.py                     # -> data/rerank_train/{train,dev}.jsonl
+python scripts/gen_beam.py --data-dirs data/rerank_train --splits dev train --conditions full \
+    --w-prior 0.3 --w-edge -1 --w-mismatch -3
+python scripts/gen_beam.py --data-dirs data/rerank_train --splits dev train --conditions notone \
+    --w-prior 0 --w-edge -1 --w-mismatch -6
+python scripts/gen_candidates.py --data-dir data/rerank_train --out-dir outputs/cand/chewing-0.14/rerank_train \
+    --splits dev train --conditions full --lib outputs/libchewing-0.14/lib/libchewing.so.3 \
+    --syspath outputs/libchewing-0.14/share/libchewing
+python scripts/build_rerank_pools.py                     # -> data/rerank_train/pools.{train,dev}.jsonl
+python scripts/train_rerank.py --out outputs/charlm/disc-a1-2ep --freeze-fusion --epochs 2
+python scripts/score_union.py --scorer charlm --model outputs/charlm/disc-a1-2ep --tag charlm-disc-a1-2ep \
+    --dtype float32 --sources chewing-0.14 beam-o4 --conditions full notone --chunk 64 --device cuda
+python scripts/evaluate_pools.py --tag charlm-disc-a1-2ep --pools beam-o4 b4+c14tab --ks 10 20 30 \
+    --conditions full notone --save-errors --out outputs/reports/rerank
 ```
