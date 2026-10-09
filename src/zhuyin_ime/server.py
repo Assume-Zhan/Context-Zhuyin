@@ -26,6 +26,20 @@ from pathlib import Path
 from zhuyin_ime.pool import FUSION_PRESETS, Fusion, PoolBuilder, fuse
 from zhuyin_ime.session import Engine, Key, Session, State
 
+COMPACT_NGRAM = "outputs/ngram/zhtw-o4-q16"
+COUNTS_NGRAM = "outputs/ngram/zhtw-o4"
+
+
+def trim_heap() -> None:
+    """Return freed heap memory to the OS (glibc keeps it resident after
+    large temporary allocations such as model loading)."""
+    try:
+        import ctypes
+
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
+
 
 class Reranker:
     """Debounced LM reranking shared by all sessions.
@@ -105,6 +119,7 @@ class Reranker:
             self.scorer.score_cached("", ["我們", "我門"])
         except Exception as exc:
             print(f"reranker warm up error: {exc}", flush=True)
+        trim_heap()
         while True:
             with self.cond:
                 warm, self.warm_context = self.warm_context, None
@@ -257,7 +272,11 @@ def build_scorer(model: str, device: str, dtype: str, threads: int, graph: bool 
     return scorer
 
 
-def build_charlm_scorer(path: str, engine: Engine, threads: int, int8: bool = False):
+def build_charlm_scorer(path: str, engine: Engine, threads: int, int8: bool = False, backend: str = "onnx"):
+    if backend == "onnx":
+        from zhuyin_rescore.charlm_ort import OrtCharLMScorer
+
+        return OrtCharLMScorer(path, int8=int8, threads=threads)
     os.environ.setdefault("OMP_NUM_THREADS", str(threads))
     os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
     import torch
@@ -279,7 +298,11 @@ def build_charlm_scorer(path: str, engine: Engine, threads: int, int8: bool = Fa
 def main() -> None:
     ap = argparse.ArgumentParser(description="Zhuyin IME conversion server")
     ap.add_argument("--socket", default="outputs/run/zhuyin-ime.sock")
-    ap.add_argument("--ngram", default="outputs/ngram/zhtw-o4")
+    ap.add_argument(
+        "--ngram",
+        default=COMPACT_NGRAM,
+        help=f"char n-gram (default: the compact model of scripts/compact_ngram.py, else {COUNTS_NGRAM})",
+    )
     ap.add_argument("--dict-dir", default="outputs/dict", help="libchewing dictionary dump (CSV) cache dir")
     ap.add_argument("--beam", type=int, default=32)
     ap.add_argument("--reranker", default=None, help="causal LM path or HF id; omit for decoder only")
@@ -290,6 +313,12 @@ def main() -> None:
     ap.add_argument("--reranker-type", default="qwen", choices=["qwen", "charlm"], help="charlm: CPU")
     ap.add_argument("--normalizer", default="full", choices=["homophone", "full"], help="charlm only")
     ap.add_argument("--int8", action="store_true", help="charlm only: int8 dynamic quantization")
+    ap.add_argument(
+        "--charlm-backend",
+        default="onnx",
+        choices=["onnx", "torch"],
+        help="charlm only; onnx: ONNX Runtime, faster and without importing torch (full softmax)",
+    )
     ap.add_argument("--debounce-ms", type=float, default=100.0)
     ap.add_argument(
         "--fusion-preset",
@@ -308,6 +337,9 @@ def main() -> None:
     args = ap.parse_args()
 
     os.nice(args.nice)
+    if args.ngram == COMPACT_NGRAM and not os.path.isdir(COMPACT_NGRAM) and os.path.isdir(COUNTS_NGRAM):
+        print(f"{COMPACT_NGRAM} not found, using {COUNTS_NGRAM} (scripts/compact_ngram.py saves memory)")
+        args.ngram = COUNTS_NGRAM
     engine = build_engine(args.ngram, args.dict_dir, args.beam)
     reranker = None
     if args.reranker:
@@ -317,11 +349,14 @@ def main() -> None:
             args.chewing_lib = None
         pool = PoolBuilder(args.chewing_lib, args.chewing_syspath, k=args.pool_k)
         if args.reranker_type == "charlm":
-            scorer = build_charlm_scorer(args.reranker, engine, args.threads, args.int8)
+            if args.charlm_backend == "onnx" and args.normalizer == "homophone":
+                ap.error("--normalizer homophone needs --charlm-backend torch")
+            scorer = build_charlm_scorer(args.reranker, engine, args.threads, args.int8, args.charlm_backend)
         else:
             scorer = build_scorer(args.reranker, args.device, args.dtype, args.threads, args.graph)
         homophone = args.reranker_type == "charlm" and args.normalizer == "homophone"
         reranker = Reranker(scorer, engine, pool, FUSION_PRESETS[preset], args.debounce_ms, homophone)
+    trim_heap()
     chewing = "with libchewing n-best" if reranker and reranker.pool.chewing else "decoder pool only"
     print(f"zhuyin-ime server on {args.socket} (reranker: {args.reranker or 'off'}, {chewing})", flush=True)
     serve(args.socket, engine, reranker)

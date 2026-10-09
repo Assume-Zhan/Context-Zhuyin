@@ -2,7 +2,8 @@
 
 Starts the server as a subprocess, types dev sentences key by key through
 the client, and reports p50 / p95 / max round trip time per key, which is
-what a front end waits for before it can draw.
+what a front end waits for before it can draw, plus the server's memory
+after typing: resident (peak, anonymous, file backed) and GPU memory.
 """
 
 from __future__ import annotations
@@ -19,6 +20,46 @@ import numpy as np
 
 from zhuyin_ime.client import ServerClient
 from zhuyin_rescore.zhuyin import syllable_keys
+
+
+def gpu_process_mb(pid: int) -> float | None:
+    """GPU memory held by one process (driver's view, so it includes the CUDA
+    context), 0 if it holds none, None without nvidia-smi. Per process
+    rather than a before / after difference: the GPU may be shared."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    used = 0.0
+    for line in out.stdout.splitlines():
+        parts = [x.strip() for x in line.split(",")]
+        if len(parts) == 2 and parts[0] == str(pid):
+            used += float(parts[1])
+    return used
+
+
+def process_memory_mb(pid: int) -> dict:
+    """Resident memory of a process: total, peak, anonymous (heap, private)
+    and file backed (mmap'd models, shared libraries; reclaimable)."""
+    kb: dict[str, int] = {}
+    for name in ("status", "smaps_rollup"):
+        with open(f"/proc/{pid}/{name}") as f:
+            for line in f:
+                key, _, rest = line.partition(":")
+                parts = rest.split()
+                if len(parts) == 2 and parts[1] == "kB":
+                    kb[key] = int(parts[0])
+    return {
+        "rss_mb": round(kb["VmRSS"] / 1024, 1),
+        "peak_rss_mb": round(kb["VmHWM"] / 1024, 1),
+        "anon_mb": round(kb["Anonymous"] / 1024, 1),
+        "file_mb": round((kb["Rss"] - kb["Anonymous"]) / 1024, 1),
+    }
 
 
 def main() -> None:
@@ -56,6 +97,8 @@ def main() -> None:
             st = client.key(name="Return")
             ok += st["commit"] == r["text"]
         stats = client.request("stats").get("reranker")
+        memory = process_memory_mb(server.pid)
+        memory["gpu_mb"] = gpu_process_mb(server.pid)
         lat = np.array(lat)
         print(
             json.dumps(
@@ -67,11 +110,14 @@ def main() -> None:
                     "max_ms": round(float(lat.max()), 2),
                     "sentence_acc": round(ok / len(rows), 3),
                     "reranker": stats,
+                    "memory": memory,
                 }
             )
         )
     finally:
         server.terminate()
+        # Wait so a following run starts on an idle machine.
+        server.wait(timeout=60)
 
 
 if __name__ == "__main__":
