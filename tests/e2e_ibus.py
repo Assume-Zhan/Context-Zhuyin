@@ -95,15 +95,22 @@ def main() -> None:
         preedits: list[str] = []
         ic.connect("commit-text", lambda _ic, text: commits.append(text.get_text()))
         ic.connect("update-preedit-text", lambda _ic, text, cursor, visible: preedits.append(text.get_text()))
+        tables: list[dict] = []
+
+        def on_table(_ic, table, visible) -> None:
+            vertical = table.get_orientation() == IBus.Orientation.VERTICAL
+            tables.append({"cursor": table.get_cursor_pos(), "vertical": vertical})
+
+        ic.connect("update-lookup-table", on_table)
         caps = IBus.Capabilite.PREEDIT_TEXT | IBus.Capabilite.FOCUS | IBus.Capabilite.LOOKUP_TABLE
         ic.set_capabilities(caps)
         ic.focus_in()
         ic.set_engine("zhuyin-lm")
         pump(0.5)
 
-        def press(keyval: int) -> bool:
-            handled = ic.process_key_event(keyval, 0, 0)
-            ic.process_key_event(keyval, 0, IBus.ModifierType.RELEASE_MASK)
+        def press(keyval: int, state: int = 0) -> bool:
+            handled = ic.process_key_event(keyval, 0, state)
+            ic.process_key_event(keyval, 0, state | IBus.ModifierType.RELEASE_MASK)
             pump(0.05)
             return handled
 
@@ -113,7 +120,22 @@ def main() -> None:
         last_preedit = preedits[-1] if preedits else ""
         press(IBus.KEY_Return)
         pump(0.3)
-        print(json.dumps({"commits": commits, "last_preedit": last_preedit}, ensure_ascii=False))
+        # Ctrl+, keeps a comma in the preedit; Down opens the candidate window
+        # and Down again moves the highlight; Enter picks it, Enter commits.
+        for ch in "ji3":
+            press(IBus.unicode_to_keyval(ch))
+        press(IBus.KEY_comma, IBus.ModifierType.CONTROL_MASK)
+        for ch in "au/6wu0 ":
+            press(IBus.unicode_to_keyval(ch))
+        comma_preedit = preedits[-1] if preedits else ""
+        press(IBus.KEY_Down)
+        press(IBus.KEY_Down)
+        table = tables[-1] if tables else {}
+        press(IBus.KEY_Return)
+        press(IBus.KEY_Return)
+        pump(0.3)
+        result = {"commits": commits, "last_preedit": last_preedit, "comma_preedit": comma_preedit}
+        print(json.dumps(result | {"table": table}, ensure_ascii=False))
     finally:
         for p in reversed(procs):
             p.terminate()

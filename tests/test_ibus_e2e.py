@@ -25,4 +25,8 @@ def test_ibus_engine_end_to_end():
     assert lines, out.stdout + out.stderr
     result = json.loads(lines[-1])
     assert result["last_preedit"] == "我明天再去學校"
-    assert result["commits"] == ["我明天再去學校"]
+    assert result["comma_preedit"] == "我，明天"
+    assert result["table"] == {"cursor": 1, "vertical": True}
+    first, second = result["commits"]
+    assert first == "我明天再去學校"
+    assert second.startswith("我，") and len(second) == 4

@@ -63,3 +63,24 @@ def test_unhandled_keys_pass_through(server):
     assert not c.key(name="Return")["handled"]
     assert not c.key(char=" ")["handled"]
     assert not c.key(char="c", ctrl=True)["handled"]
+
+
+def test_segments_are_reranked_in_turn(server):
+    from zhuyin_ime.client import ServerClient
+
+    c = ServerClient(server, timeout=5)
+    st = None
+    for ch in "ji au/ wu0 <y9 fm ":
+        st = c.key(char=ch)
+    assert "，" in st["preedit"]
+    deadline = time.time() + 5
+    pushes = []
+    while len(pushes) < 2 and time.time() < deadline:
+        time.sleep(0.05)
+        c.read_available()
+        pushes += c.take_pushes()
+    # The stub prefers candidate 2 of each segment: one push per segment.
+    assert len(pushes) == 2
+    first, second = pushes[-1]["preedit"].split("，")
+    assert first != st["preedit"].split("，")[0]
+    c.key(name="Escape")

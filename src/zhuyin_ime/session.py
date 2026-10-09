@@ -2,10 +2,13 @@
 
 A session holds the syllables typed so far, the syllable being composed,
 the cursor, the phrases the user picked (locked spans), the candidate window
-and the committed history used as LM context. After every change it decodes
-incrementally with the beam decoder and shows the 1-best right away; an
-optional LM reranker can later replace the preedit with a better candidate
-(apply_rerank), as long as the input has not changed in the meantime.
+and the committed history used as LM context. Punctuation stays in the
+preedit like a syllable until Enter, so earlier choices remain editable; it
+splits the input into segments that are decoded separately, each with the
+text before it as context. After every change the beam decoder updates the
+segment being typed and the 1-best is shown right away; an optional LM
+reranker can later pick a better candidate for a segment (apply_rerank), as
+long as that segment has not changed in the meantime.
 """
 
 from __future__ import annotations
@@ -22,6 +25,10 @@ PUNCTUATION = {
     "<": "，", ">": "。", "?": "？", "!": "！", ":": "：", '"': "；", "'": "、",
     "[": "「", "]": "」", "{": "『", "}": "』", "\\": "、", "(": "（", ")": "）", "~": "～",
 }  # fmt: skip
+# With Ctrl held, keys that are bopomofo symbols on the Dai Chien layout type
+# punctuation too (Ctrl+, for a comma without reaching for Shift).
+CTRL_PUNCTUATION = {",": "，", ".": "。", ";": "；", **PUNCTUATION}
+MARKS = frozenset(CTRL_PUNCTUATION.values())
 PAGE_SIZE = 9
 HISTORY_CHARS = 200
 MAX_SYLLABLES = 40
@@ -52,6 +59,15 @@ class State:
 
     def to_json(self) -> dict:
         return asdict(self)
+
+
+@dataclass
+class Segment:
+    """Decoder k-best of one run of syllables between punctuation marks."""
+
+    kbest: list[Decoded]
+    choice: int = 0  # index of the candidate shown in the preedit
+    seen: bool = False  # already scored by the reranker
 
 
 class Engine:
@@ -87,32 +103,59 @@ class Session:
         self.engine = engine
         self.decoder = BeamDecoder(engine.lexicon, engine.ngram, beam=engine.beam, weights=engine.weights)
         self.composer = Composer(is_valid=engine.valid_syllable)
+        # Syllables, plus the punctuation marks typed between them (one
+        # preedit character each, so positions index both).
         self.syllables: list[str] = []
         self.locks: dict[tuple[int, int], str] = {}
         self.cursor = 0
         self.history = ""
-        self.kbest: list[Decoded] = []
-        self.reranked: str | None = None
         self.version = 0
+        # Segments of the current input by (context, syllables, relative
+        # locks); kept across keys so only the segment being typed is decoded.
+        self.segments: dict[tuple, Segment] = {}
+        self.segment_keys: list[tuple] = []
+        self.text = ""
         self.cand_items: list[tuple[int, int, str]] = []
         self.cand_page = 0
+        self.cand_cursor = 0
 
     # ------------------------------------------------------------------ helpers
     def _text(self) -> str:
-        if self.reranked is not None:
-            return self.reranked
-        if self.kbest:
-            return self.kbest[0].text
-        return "".join(self.syllables)
+        return self.text
 
     def _decode(self) -> None:
         self.version += 1
-        self.reranked = None
-        locks = [(s, e, p) for (s, e), p in self.locks.items()]
-        self.kbest = self.engine_decode(locks) if self.syllables else []
+        self._rebuild()
 
-    def engine_decode(self, locks) -> list[Decoded]:
-        return self.decoder.decode(self.syllables, history=self.history[-64:], k=self.engine.k, locks=locks)
+    def _rebuild(self) -> None:
+        """Decode each segment with the text before it as context; segments
+        whose context, syllables and locks are unchanged are reused."""
+        segments, keys, text = {}, [], ""
+        n = len(self.syllables)
+        start = 0
+        for i in range(n + 1):
+            if i < n and self.syllables[i] not in MARKS:
+                continue
+            if i > start:
+                locks = tuple(
+                    sorted(
+                        (s - start, e - start, p) for (s, e), p in self.locks.items() if start <= s < e <= i
+                    )
+                )
+                context, syls = (self.history + text)[-64:], self.syllables[start:i]
+                key = (context, tuple(syls), locks)
+                seg = self.segments.get(key)
+                if seg is None:
+                    seg = Segment(
+                        self.decoder.decode(syls, history=context, k=self.engine.k, locks=list(locks))
+                    )
+                segments[key] = seg
+                keys.append(key)
+                text += seg.kbest[seg.choice].text if seg.kbest else "".join(key[1])
+            if i < n:
+                text += self.syllables[i]
+            start = i + 1
+        self.segments, self.segment_keys, self.text = segments, keys, text
 
     def _state(self, handled: bool = True, commit: str = "") -> State:
         text = self._text() if self.syllables else ""
@@ -120,16 +163,14 @@ class Session:
         cursor = len(text) + len(self.composer.text()) if not self.composer.empty() else self.cursor
         st = State(handled=handled, commit=commit, preedit=preedit, cursor=cursor, version=self.version)
         if self.cand_items:
-            pages = (len(self.cand_items) + PAGE_SIZE - 1) // PAGE_SIZE
-            items = self.cand_items[self.cand_page * PAGE_SIZE : (self.cand_page + 1) * PAGE_SIZE]
-            st.candidates = [p for _, _, p in items]
-            st.page, st.pages = self.cand_page, pages
+            st.candidates = [p for _, _, p in self._page_items(self.cand_page)]
+            st.highlight, st.page, st.pages = self.cand_cursor, self.cand_page, self._pages()
         return st
 
-    def _commit_all(self, extra: str = "", boundary: str = "") -> str:
-        """Commit the preedit plus extra; boundary is recorded in the history
-        only (Enter ends a line or message, so the next clause starts fresh)."""
-        text = (self._text() if self.syllables else "") + extra
+    def _commit_all(self, boundary: str = "") -> str:
+        """Commit the preedit; boundary is recorded in the history only
+        (Enter ends a line or message, so the next clause starts fresh)."""
+        text = self._text() if self.syllables else ""
         self.history = (self.history + text + boundary)[-HISTORY_CHARS:]
         self.syllables, self.locks, self.cursor = [], {}, 0
         self.composer.clear()
@@ -141,19 +182,38 @@ class Session:
         return bool(self.syllables) or not self.composer.empty()
 
     # ---------------------------------------------------------------- candidates
+    def _pages(self) -> int:
+        return max((len(self.cand_items) + PAGE_SIZE - 1) // PAGE_SIZE, 1)
+
+    def _page_items(self, page: int) -> list[tuple[int, int, str]]:
+        return self.cand_items[page * PAGE_SIZE : (page + 1) * PAGE_SIZE]
+
     def _open_candidates(self) -> State:
+        """Phrases starting at the cursor, or ending at the end of the input
+        (before any trailing punctuation), within one segment."""
         n = len(self.syllables)
         if self.cursor < n:
-            spans = [(self.cursor, self.cursor + length) for length in range(min(6, n - self.cursor), 0, -1)]
+            if self.syllables[self.cursor] in MARKS:
+                return self._state()
+            end = self.cursor
+            while end < n and self.syllables[end] not in MARKS:
+                end += 1
+            spans = [(self.cursor, self.cursor + n_syl) for n_syl in range(min(6, end - self.cursor), 0, -1)]
         else:
-            spans = [(n - length, n) for length in range(min(6, n), 0, -1)]
+            end = n
+            while end > 0 and self.syllables[end - 1] in MARKS:
+                end -= 1
+            start = end
+            while start > 0 and self.syllables[start - 1] not in MARKS:
+                start -= 1
+            spans = [(end - length, end) for length in range(min(6, end - start), 0, -1)]
         items, seen = [], set()
         for s, e in spans:
             for phrase, _ in self.engine.lexicon.lookup_span(tuple(self.syllables[s:e])):
                 if (s, e, phrase) not in seen:
                     seen.add((s, e, phrase))
                     items.append((s, e, phrase))
-        self.cand_items, self.cand_page = items, 0
+        self.cand_items, self.cand_page, self.cand_cursor = items, 0, 0
         return self._state()
 
     def _pick(self, index: int) -> State:
@@ -169,25 +229,43 @@ class Session:
         return self._state()
 
     def _candidate_key(self, key: Key) -> State:
-        pages = (len(self.cand_items) + PAGE_SIZE - 1) // PAGE_SIZE
+        """Digits pick from the page; Up and Down move the highlight (and
+        turn the page at its ends), Enter picks the highlighted candidate."""
+        pages = self._pages()
         if key.char and key.char in "123456789":
             return self._pick(int(key.char) - 1)
-        if key.name in ("Down", "Page_Down") or key.char == " ":
-            self.cand_page = (self.cand_page + 1) % max(pages, 1)
-        elif key.name in ("Up", "Page_Up"):
-            self.cand_page = (self.cand_page - 1) % max(pages, 1)
+        if key.name == "Return":
+            return self._pick(self.cand_cursor)
+        if key.name == "Down":
+            if self.cand_cursor + 1 < len(self._page_items(self.cand_page)):
+                self.cand_cursor += 1
+            else:
+                self.cand_page, self.cand_cursor = (self.cand_page + 1) % pages, 0
+        elif key.name == "Up":
+            if self.cand_cursor > 0:
+                self.cand_cursor -= 1
+            else:
+                self.cand_page = (self.cand_page - 1) % pages
+                self.cand_cursor = len(self._page_items(self.cand_page)) - 1
+        elif key.name == "Page_Down" or key.char == " ":
+            self.cand_page, self.cand_cursor = (self.cand_page + 1) % pages, 0
+        elif key.name == "Page_Up":
+            self.cand_page, self.cand_cursor = (self.cand_page - 1) % pages, 0
         elif key.name == "Escape":
             self.cand_items = []
         return self._state()
 
     # ---------------------------------------------------------------- key input
     def process_key(self, key: Key) -> State:
-        if key.ctrl or key.alt:
+        mark = "" if key.alt else (CTRL_PUNCTUATION if key.ctrl else PUNCTUATION).get(key.char, "")
+        if (key.ctrl or key.alt) and not mark:
             return State(handled=False, preedit=self._state().preedit, version=self.version)
         if self.cand_items:
             return self._candidate_key(key)
 
         ch, name = key.char, key.name
+        if mark:  # before the symbol keys: Ctrl+, is a comma, not the symbol on that key
+            return self._add_mark(mark)
         if ch and Composer.handles(ch) and not key.shift:
             if ch in TONE_KEYS:
                 return self._finish_syllable(TONE_KEYS[ch])
@@ -201,9 +279,6 @@ class Session:
             if self.syllables:
                 return self._open_candidates()
             return State(handled=False, version=self.version)
-        if ch in PUNCTUATION:
-            commit = self._commit_all(PUNCTUATION[ch])
-            return self._state(commit=commit)
         if name == "Return":
             if not self._busy():
                 return State(handled=False, version=self.version)
@@ -259,6 +334,21 @@ class Session:
             self._decode()
         return self._state(commit=commit)
 
+    def _add_mark(self, mark: str) -> State:
+        """Punctuation joins the preedit; a syllable still being composed is
+        finished without a tone first (dropped if it is not a syllable)."""
+        if not self.composer.empty():
+            syl = self.composer.finish("")
+            self.composer.clear()
+            if syl is not None:
+                self.syllables.append(syl)
+        self.syllables.append(mark)
+        self.cursor = len(self.syllables)
+        if len(self.syllables) > MAX_SYLLABLES:
+            return self._state(commit=self._commit_all())
+        self._decode()
+        return self._state()
+
     def _remove_syllable(self, index: int) -> None:
         del self.syllables[index]
         shifted = {}
@@ -295,23 +385,32 @@ class Session:
         return self._state(commit=commit)
 
     # ---------------------------------------------------------------- reranking
-    def rerank_request(self) -> tuple[int, str, list[Decoded], list[str]] | None:
-        """(version, history, k-best, typed syllables) for the reranker."""
-        if len(self.kbest) < 2:
-            return None
-        return self.version, self.history[-HISTORY_CHARS:], list(self.kbest), list(self.syllables)
+    def rerank_request(self) -> tuple[tuple, str, list[Decoded], list[str]] | None:
+        """(segment key, context, k-best, typed syllables) of the first
+        segment the reranker has not scored yet, or None."""
+        for key in self.segment_keys:
+            seg = self.segments[key]
+            if not seg.seen and len(seg.kbest) >= 2:
+                return key, key[0], list(seg.kbest), list(key[1])
+        return None
 
-    def apply_rerank(self, version: int, lm_scores: list[float]) -> State | None:
-        """Fuse LM scores with the decoder's n-gram scores; None if stale."""
-        if version != self.version or len(lm_scores) != len(self.kbest):
+    def apply_rerank(self, key: tuple, lm_scores: list[float]) -> State | None:
+        """Fuse LM scores with the decoder's n-gram scores for the segment
+        with this key; None if it is stale or the choice did not change.
+        Later segments are decoded again with the new text as context, but
+        the version stays: the typed input is the same."""
+        seg = self.segments.get(key)
+        if seg is None or seg.seen or len(lm_scores) != len(seg.kbest):
             return None
+        seg.seen = True
         a, beta, mu = self.engine.fusion
-        best, best_s = None, float("-inf")
-        for i, (d, lm) in enumerate(zip(self.kbest, lm_scores, strict=True)):
+        best, best_s = 0, float("-inf")
+        for i, (d, lm) in enumerate(zip(seg.kbest, lm_scores, strict=True)):
             s = lm + a * d.feats[0] - beta * (i > 0) - mu * i
             if s > best_s:
-                best, best_s = d.text, s
-        if best == self._text():
+                best, best_s = i, s
+        if best == seg.choice:
             return None
-        self.reranked = best
+        seg.choice = best
+        self._rebuild()
         return self._state()

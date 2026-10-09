@@ -4,8 +4,9 @@ Protocol: JSON lines. A front end sends requests with an integer "id"
   {"op": "key", "id": 1, "char": "q", "name": "", "shift": false, "ctrl": false, "alt": false}
   {"op": "reset", "id": 2}  {"op": "focus_out", "id": 3}  {"op": "ping", "id": 4}
 and gets one reply with the same id: {"op": "state", "id": 1, ...State fields}.
-When the LM reranker finds a better sentence for the current input, the
-server pushes {"op": "state", "id": null, "push": true, ...} on its own.
+When the LM reranker finds a better candidate for a segment of the current
+input, the server pushes {"op": "state", "id": null, "push": true, ...} on
+its own. Segments (runs between punctuation marks) are reranked in order.
 
 Each connection is one input context with its own Session. The server
 blocks in recv when idle and the reranker worker blocks on a condition
@@ -39,9 +40,14 @@ class Reranker:
         self.last_ms = 0.0
         threading.Thread(target=self._run, daemon=True, name="reranker").start()
 
-    def request(self, conn: Connection) -> None:
+    def request(self, conn: Connection, delay: float | None = None) -> None:
+        """Rerank after the debounce, or after delay (follow up requests);
+        a pending request from a key keeps its debounce."""
         with self.cond:
-            self.pending[id(conn)] = (time.monotonic() + self.debounce, conn)
+            if delay is not None and id(conn) in self.pending:
+                return
+            due = time.monotonic() + (self.debounce if delay is None else delay)
+            self.pending[id(conn)] = (due, conn)
             self.cond.notify()
 
     def _run(self) -> None:
@@ -61,7 +67,7 @@ class Reranker:
                 req = conn.session.rerank_request()
             if req is None:
                 continue
-            version, history, kbest, syllables = req
+            seg_key, history, kbest, syllables = req
             t0 = time.perf_counter()
             texts = [d.text for d in kbest]
             try:
@@ -74,9 +80,13 @@ class Reranker:
                 continue
             self.last_ms = (time.perf_counter() - t0) * 1000
             with conn.lock:
-                st = conn.session.apply_rerank(version, scores)
+                st = conn.session.apply_rerank(seg_key, scores)
+                more = conn.session.rerank_request() is not None
             if st is not None:
                 conn.send({"op": "state", "id": None, "push": True, **st.to_json()})
+            if more:
+                # The next segment, or a later one decoded again with new context.
+                self.request(conn, delay=0.0)
 
 
 class Connection:

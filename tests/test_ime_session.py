@@ -100,13 +100,78 @@ def test_candidate_window_locks_choice(engine):
     assert st.preedit.endswith(target) and not st.candidates
 
 
-def test_punctuation_commits(engine):
+def test_punctuation_stays_in_preedit_until_enter(engine):
     from zhuyin_ime.session import Key
 
     s = engine.new_session()
     type_keys(s, "ji3")
     st = s.process_key(Key(char="<", shift=True))
-    assert st.commit == "我，"
+    assert st.commit == "" and st.preedit == "我，"
+    st = type_keys(s, "au/6wu0 ")
+    assert st.preedit == "我，明天"
+    st = s.process_key(Key(name="Return"))
+    assert st.commit == "我，明天" and s.history.endswith("我，明天\n")
+
+
+def test_ctrl_punctuation(engine):
+    from zhuyin_ime.session import Key
+
+    s = engine.new_session()
+    type_keys(s, "ji3")
+    st = s.process_key(Key(char=",", ctrl=True))
+    assert st.handled and st.preedit == "我，"
+    st = s.process_key(Key(char=".", ctrl=True))
+    assert st.preedit == "我，。"
+    assert not s.process_key(Key(char="c", ctrl=True)).handled  # other Ctrl chords pass through
+
+
+def test_punctuation_finishes_the_syllable_being_composed(engine):
+    from zhuyin_ime.session import Key
+
+    s = engine.new_session()
+    type_keys(s, "ji")  # wo, no tone key yet
+    st = s.process_key(Key(char=",", ctrl=True))
+    assert s.syllables == ["ㄨㄛ", "，"] and len(st.preedit) == 2 and st.preedit.endswith("，")
+
+
+def test_candidates_before_trailing_punctuation(engine):
+    from zhuyin_ime.session import Key
+
+    s = engine.new_session()
+    type_keys(s, "ji3au/6wu0 ")
+    s.process_key(Key(char=",", ctrl=True))
+    st = s.process_key(Key(name="Down"))  # phrases ending before the comma
+    assert "明天" in st.candidates and st.highlight == 0
+    # Walk the highlight to a one character alternative for the last syllable.
+    target = next(p for _, _, p in s.cand_items if len(p) == 1 and p != "天")
+    while st.candidates[st.highlight] != target:
+        st = s.process_key(Key(name="Down"))
+    st = s.process_key(Key(name="Return"))
+    assert st.preedit == "我明" + target + "，" and not st.candidates and st.commit == ""
+
+
+def test_candidate_highlight_moves_and_turns_pages(engine):
+    from zhuyin_ime.session import PAGE_SIZE, Key
+
+    s = engine.new_session()
+    type_keys(s, "ji3au/6wu0 g ")  # wo ming tian shi, the last one without a tone
+    st = s.process_key(Key(name="Down"))
+    assert st.pages > 2 and st.highlight == 0
+    st = s.process_key(Key(name="Down"))
+    assert (st.page, st.highlight) == (0, 1)
+    st = s.process_key(Key(name="Up"))
+    st = s.process_key(Key(name="Up"))  # past the top: last item of the last page
+    assert st.page == st.pages - 1 and st.highlight == len(st.candidates) - 1
+    st = s.process_key(Key(name="Down"))  # past the bottom: first item of the first page
+    assert (st.page, st.highlight) == (0, 0)
+    for _ in range(PAGE_SIZE):
+        st = s.process_key(Key(name="Down"))
+    assert (st.page, st.highlight) == (1, 0)
+    st = s.process_key(Key(char=" "))
+    assert st.page == 2 % st.pages and st.highlight == 0
+    picked = st.candidates[0]
+    st = s.process_key(Key(name="Return"))
+    assert st.preedit.endswith(picked) and not st.candidates and st.commit == ""
 
 
 def test_rerank_applies_only_to_current_version(engine):
@@ -122,3 +187,22 @@ def test_rerank_applies_only_to_current_version(engine):
     assert st is not None and st.preedit == kbest[1].text
     type_keys(s, "y9 ")
     assert s.apply_rerank(version, scores) is None  # stale
+
+
+def test_rerank_per_segment_survives_typing_after_punctuation(engine):
+    from zhuyin_ime.session import Key
+
+    s = engine.new_session()
+    type_keys(s, "ji au/ wu0 ")
+    s.process_key(Key(char=",", ctrl=True))
+    key, _, kbest, syllables = s.rerank_request()
+    assert len(syllables) == 3
+    scores = [0.0] * len(kbest)
+    scores[1] = 1000.0
+    st = s.apply_rerank(key, scores)
+    assert st.preedit == kbest[1].text + "，"
+    assert s.apply_rerank(key, scores) is None  # already scored
+    st = type_keys(s, "y9 ")
+    assert st.preedit.startswith(kbest[1].text + "，")  # the first segment keeps its choice
+    key2, context, _, syllables2 = s.rerank_request()
+    assert syllables2 == ["ㄗㄞ"] and context.endswith(kbest[1].text + "，")

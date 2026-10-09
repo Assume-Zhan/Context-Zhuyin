@@ -11,7 +11,7 @@ needed), then switch to it with `ibus engine zhuyin-lm`:
     python3 -m zhuyin_ime.ibus_engine --socket /path/to/zhuyin-ime.sock
 
 ibus-daemon starts it with --ibus when the component XML is installed
-(scripts/ibus/install_component.sh).
+(scripts/ibus/install.sh --system).
 """
 
 from __future__ import annotations
@@ -65,6 +65,8 @@ class ZhuyinLmEngine(IBus.Engine):
         super().__init__(*args, **kwargs)
         self.client = ServerClient(SOCKET_PATH, timeout=0.5)
         self.table = IBus.LookupTable.new(9, 0, True, True)
+        # Up and Down move the highlight, so list the candidates vertically.
+        self.table.set_orientation(IBus.Orientation.VERTICAL)
         self.watch_id = 0
         self.version = 0
 
@@ -124,6 +126,7 @@ class ZhuyinLmEngine(IBus.Engine):
             for i, c in enumerate(cands):
                 self.table.append_candidate(IBus.Text.new_from_string(c))
                 self.table.set_label(i, IBus.Text.new_from_string(f"{i + 1}."))
+            self.table.set_cursor_pos(min(st.get("highlight", 0), len(cands) - 1))
             self.update_lookup_table(self.table, True)
             page = f"{st.get('page', 0) + 1}/{max(st.get('pages', 1), 1)}"
             self.update_auxiliary_text(IBus.Text.new_from_string(page), True)
