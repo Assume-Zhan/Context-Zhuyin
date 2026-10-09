@@ -69,5 +69,12 @@ def test_homophone_normalization(scorer):
     assert single == pytest.approx(0.0, abs=1e-5)
 
 
+def test_candidates_keep_their_length(scorer):
+    # Two out of vocabulary characters in a row must stay two positions.
+    scores = scorer.score_cached("", ["我龘龘再", "我明天再"])
+    assert len(scorer.vocab.encode_chars("我龘龘再")) == 4
+    assert all(math.isfinite(x) for x in scores)
+
+
 def test_bos_is_first(scorer):
     assert scorer.context_ids("")[0] == BOS

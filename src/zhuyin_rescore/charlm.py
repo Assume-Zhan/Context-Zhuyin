@@ -61,6 +61,12 @@ class CharVocab:
             ids = ids[keep]
         return ids.tolist()
 
+    def encode_chars(self, text: str) -> list[int]:
+        """One id per character, no collapsing (candidates must keep their length)."""
+        if not text:
+            return []
+        return self._lut[np.frombuffer(text.encode("utf-32-le"), dtype=np.uint32)].tolist()
+
     def save(self, path: Path) -> None:
         path.write_text(json.dumps(self.tokens[len(SPECIALS) + len(PUNCT) :], ensure_ascii=False))
 
@@ -190,7 +196,7 @@ class CharLMScorer:
     @torch.inference_mode()
     def _hidden(self, context: str, candidates: list[str], cache=None):
         past, last_h, p = cache if cache is not None else self.context_cache(context)
-        ids = torch.tensor([self.vocab.encode(c) for c in candidates], device=self.device)
+        ids = torch.tensor([self.vocab.encode_chars(c) for c in candidates], device=self.device)
         h, _ = self.model.hidden(ids, pos_offset=p, past=past, mask=self._mask(p, ids.shape[1]))
         # Character t is predicted by the state before it; the first by the context.
         h = torch.cat([last_h.expand(len(candidates), 1, -1), h[:, :-1]], dim=1)
