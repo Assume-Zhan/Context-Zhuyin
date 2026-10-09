@@ -47,12 +47,11 @@ docker compose -f docker/docker-compose.yml up -d phonetic-candidate-dev
 
 The repo is bind mounted at `/workspace` in the container, so files the
 container writes under `outputs/` (models, the socket) appear in your clone.
-The commands below that start with `dz` run inside the container; define
-both helpers (`dzd` runs a command in the background):
+Steps 2 and 3 run inside the container; open a shell there (it starts in
+`/workspace`):
 
 ```bash
-alias dz='docker compose -f docker/docker-compose.yml exec phonetic-candidate-dev'
-alias dzd='docker compose -f docker/docker-compose.yml exec -d phonetic-candidate-dev'
+docker compose -f docker/docker-compose.yml exec phonetic-candidate-dev bash
 ```
 
 ### 2. Prepare the models (once)
@@ -62,23 +61,23 @@ already exist.
 
 ```bash
 # Data: Taiwan news, PTT, zh-TW Wikipedia, 2025 Taiwan web pages, Common Voice
-dz python scripts/build_dataset.py          # news dev/test sets (used to dedupe training text)
-dz python scripts/fetch_corpora.py          # about 6 GB of downloads
-dz python scripts/build_corpus.py
-dz python scripts/build_eval_sets.py        # g2pW readings, about 10 minutes
-dz python scripts/build_train_text.py       # drops training documents that contain test sentences
+python scripts/build_dataset.py          # news dev/test sets (used to dedupe training text)
+python scripts/fetch_corpora.py          # about 6 GB of downloads
+python scripts/build_corpus.py
+python scripts/build_eval_sets.py        # g2pW readings, about 10 minutes
+python scripts/build_train_text.py       # drops training documents that contain test sentences
 
 # Required: the character 4-gram used by the decoder (about 3 minutes, CPU)
-dz python scripts/train_ngram.py            # -> outputs/ngram/zhtw-o4
+python scripts/train_ngram.py            # -> outputs/ngram/zhtw-o4
 
 # Optional: CPU reranker, 16M character LM (about 6 minutes on a GPU)
-dz python scripts/prepare_charlm_data.py
-dz python scripts/train_charlm.py --out outputs/charlm/small --d-model 384 --layers 6 --heads 6 --d-ff 1536
+python scripts/prepare_charlm_data.py
+python scripts/train_charlm.py --out outputs/charlm/small --d-model 384 --layers 6 --heads 6 --d-ff 1536
 
 # Optional: GPU reranker, Qwen2.5-0.5B with zh-TW continued pretraining
 # (about 3 hours on an RTX 5090)
-dz python scripts/prepare_lm_data.py
-dz python scripts/train_lm.py               # -> outputs/lm/qwen2.5-0.5b-zhtw
+python scripts/prepare_lm_data.py
+python scripts/train_lm.py               # -> outputs/lm/qwen2.5-0.5b-zhtw
 ```
 
 The libchewing dictionary is dumped to `outputs/dict/` the first time the
@@ -86,18 +85,19 @@ server starts in the container.
 
 ### 3. Start the conversion server
 
-Pick one (use `dz` instead of `dzd` to keep it in the foreground and see
-its log):
+In the container, pick one. The server runs in the foreground and logs to
+the terminal; keep that shell open while you use the input method (append
+`&` to get the prompt back):
 
 ```bash
 # Decoder only (CPU, needs no reranker model)
-dzd python -m zhuyin_ime.server
+python -m zhuyin_ime.server
 
 # CPU reranker: 16M character LM, int8, one thread
-dzd python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8
+python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8
 
 # GPU reranker: Qwen2.5-0.5B zh-TW, replayed as a CUDA graph
-dzd python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw --graph
+python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw --graph
 ```
 
 With a reranker, input typed with tones also gets libchewing 0.14's n-best
@@ -108,7 +108,7 @@ before that, add `--chewing-lib outputs/libchewing-0.14/lib/libchewing.so.3
 out: the pool is then the decoder's own). Add `--pool-k 10` to keep the CPU
 reranker's p95 latency under 50 ms at a small cost in toneless accuracy.
 
-To stop it: `dz pkill -f zhuyin_ime.server`.
+To stop it: Ctrl+C, or `pkill -f zhuyin_ime.server` in the container.
 
 Without Docker, the decoder-only server runs on the host with Python 3.10+
 and numpy, once `outputs/dict/` and `outputs/ngram/zhtw-o4` exist (the CPU
@@ -158,7 +158,7 @@ punctuation. The full key table is in [docs/ime.md](docs/ime.md).
   that `ZHUYIN_IME_SOCKET` (if set) points to it.
 - The engine is not listed: run `ibus restart` after `install.sh --system`,
   or start `~/.local/bin/zhuyin-ime-ibus` again after an IBus restart.
-- To see the server log, start it with `dz` instead of `dzd`.
+- To see the server log, run it in the foreground (without `&`).
 
 ### Uninstall
 
