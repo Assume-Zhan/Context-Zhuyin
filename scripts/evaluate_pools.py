@@ -70,6 +70,9 @@ def compose(policy: str, src: dict[str, dict], k: int) -> list[str]:
     return out
 
 
+LM_FIELD = "lm"
+
+
 def load(cand_root: Path, score_dir: Path, sources: list[str], domain: str, split: str, cond: str):
     rows: dict[str, dict] = {}
     for s in sources:
@@ -79,7 +82,7 @@ def load(cand_root: Path, score_dir: Path, sources: list[str], domain: str, spli
     feats = {}
     for r in read_jsonl(score_dir / domain / f"{split}.{cond}.jsonl"):
         zeros = [0.0] * len(r["texts"])
-        lm, lm_noctx = r.get("lm", zeros), r.get("lm_noctx", zeros)
+        lm, lm_noctx = r.get(LM_FIELD, zeros), r.get("lm_noctx", zeros)
         feats[r["id"]] = {t: (lm[i], lm_noctx[i], r["ngram"][i]) for i, t in enumerate(r["texts"])}
     for rid, row in rows.items():
         row["feats"] = feats.get(rid, {})
@@ -147,7 +150,11 @@ def main() -> None:
     ap.add_argument("--ks", nargs="+", type=int, default=[10, 30])
     ap.add_argument("--out", default="outputs/reports")
     ap.add_argument("--save-errors", action="store_true", help="also save per example errors (npz)")
+    ap.add_argument("--lm-field", default="lm", help="score column for the LM feature (lm or lm_homo)")
     args = ap.parse_args()
+    global LM_FIELD
+    LM_FIELD = args.lm_field
+    report_tag = args.tag if args.lm_field == "lm" else f"{args.tag}.{args.lm_field}"
     all_errors: dict[str, np.ndarray] = {}
 
     score_dir = Path(args.score_root) / args.tag
@@ -223,10 +230,10 @@ def main() -> None:
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"pools.{args.tag}.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
-    (out / f"pools.{args.tag}.md").write_text("\n".join(lines) + "\n")
+    (out / f"pools.{report_tag}.json").write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+    (out / f"pools.{report_tag}.md").write_text("\n".join(lines) + "\n")
     if args.save_errors:
-        np.savez_compressed(out / f"pools.{args.tag}.errors.npz", **all_errors)
+        np.savez_compressed(out / f"pools.{report_tag}.errors.npz", **all_errors)
 
 
 if __name__ == "__main__":

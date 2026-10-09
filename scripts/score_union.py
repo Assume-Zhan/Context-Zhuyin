@@ -76,16 +76,32 @@ def main() -> None:
     ap.add_argument("--out-root", default="outputs/scores")
     ap.add_argument("--no-lm", action="store_true", help="only compute the n-gram feature")
     ap.add_argument("--chunk", type=int, default=32, help="candidates per forward, bounds GPU memory")
+    ap.add_argument("--scorer", default="qwen", choices=["qwen", "charlm"])
+    ap.add_argument("--device", default="cuda")
     args = ap.parse_args()
     tag = args.tag or f"{args.model.rstrip('/').split('/')[-1]}-{args.dtype}"
 
-    scorer = None if args.no_lm else LMScorer(args.model, dtype=args.dtype)
+    homophone_fns: dict[str, object] = {}
+    if args.no_lm:
+        scorer = None
+    elif args.scorer == "charlm":
+        from zhuyin_rescore.charlm import CharLMScorer
+        from zhuyin_rescore.lexicon import Lexicon, load_entries
+
+        scorer = CharLMScorer(args.model, device=args.device)
+        entries = load_entries()
+        for cond in args.conditions:
+            lex = Lexicon(entries, cond)
+            homophone_fns[cond] = lambda syl, lex=lex: [p for p, _ in lex.lookup_span((syl,))]
+    else:
+        scorer = LMScorer(args.model, dtype=args.dtype, device=args.device)
     empty_cache = scorer.context_cache("") if scorer is not None else None
     ngram = CharNgram.load(args.ngram)
     for domain in args.domains:
         data_dir = Path(args.data_root) / ("news" if domain == "news" else f"eval/{domain}")
         for split in args.splits:
-            contexts = {ex["id"]: ex["context"] for ex in read_jsonl(data_dir / f"{split}.jsonl")}
+            examples = {ex["id"]: ex for ex in read_jsonl(data_dir / f"{split}.jsonl")}
+            contexts = {i: ex["context"] for i, ex in examples.items()}
             for cond in args.conditions:
                 t0 = time.time()
                 union = load_union(Path(args.cand_root), args.sources, domain, split, cond, args.k)
@@ -97,6 +113,15 @@ def main() -> None:
                     if scorer is not None:
                         row["lm"] = score_chunked(scorer, ctx, ex["texts"], args.chunk)
                         row["lm_noctx"] = score_chunked(scorer, "", ex["texts"], args.chunk, empty_cache)
+                    if cond in homophone_fns and ex["texts"]:
+                        scorer.homophones = homophone_fns[cond]
+                        syl = examples[ex["id"]][f"zhuyin_{cond}"]
+                        row["lm_homo"] = []
+                        for i in range(0, len(ex["texts"]), args.chunk):
+                            part = ex["texts"][i : i + args.chunk]
+                            row["lm_homo"] += scorer.score_homophone(ctx, part, syl)
+                    elif cond in homophone_fns:
+                        row["lm_homo"] = []
                     out.append(row)
                 write_jsonl(Path(args.out_root) / tag / domain / f"{split}.{cond}.jsonl", out)
                 sizes = np.array([len(r["texts"]) for r in out])
@@ -106,6 +131,7 @@ def main() -> None:
                     flush=True,
                 )
     meta = {"model": args.model, "dtype": args.dtype, "sources": args.sources, "k": args.k}
+    meta["scorer"] = args.scorer
     if torch.cuda.is_available():
         meta["gpu"] = torch.cuda.get_device_name(0)
     (Path(args.out_root) / tag / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
