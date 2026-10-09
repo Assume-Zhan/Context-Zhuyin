@@ -94,12 +94,19 @@ its log):
 dzd python -m zhuyin_ime.server
 
 # CPU reranker: 16M character LM, int8, one thread
-dzd python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8 \
-    --fusion-a 0.3 --fusion-beta 1.0 --fusion-mu 0.1
+dzd python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8
 
 # GPU reranker: Qwen2.5-0.5B zh-TW, replayed as a CUDA graph
 dzd python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw --graph
 ```
+
+With a reranker, input typed with tones also gets libchewing 0.14's n-best
+in the candidate pool. The dev image builds libchewing 0.14 and the server
+finds it through `CHEWING14_LIB` / `CHEWING14_PATH`; in a container built
+before that, add `--chewing-lib outputs/libchewing-0.14/lib/libchewing.so.3
+--chewing-syspath outputs/libchewing-0.14/share/libchewing` (or leave it
+out: the pool is then the decoder's own). Add `--pool-k 10` to keep the CPU
+reranker's p95 latency under 50 ms at a small cost in toneless accuracy.
 
 To stop it: `dz pkill -f zhuyin_ime.server`.
 

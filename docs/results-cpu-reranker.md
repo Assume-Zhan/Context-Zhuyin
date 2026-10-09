@@ -134,13 +134,17 @@ pushes its result).
 Recommended CPU only server:
 
 ```bash
-python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8 \
-    --fusion-a 0.3 --fusion-beta 1.0 --fusion-mu 0.1
+python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8
 ```
+
+(The fusion weights are now chosen per candidate pool type, see
+[ime.md](ime.md#candidate-pool); the pool also grew since this
+measurement, which moves the IME numbers to 82.5% / 77.0%.)
 
 ## Next steps
 
-- Widen the IME pool (decoder k = 20, or merge libchewing 0.14's n-best):
+- Widen the IME pool (decoder k = 20, or merge libchewing 0.14's n-best;
+  done, see [ime.md](ime.md#candidate-pool)):
   1.00% toned and 3.48% toneless CER is the Oracle@10 floor, sentences whose
   correct form is not in the decoder 10-best at all, which no reranker can
   fix. Toneless input is mostly pool limited.
@@ -161,5 +165,5 @@ python scripts/evaluate_pools.py --tag charlm-small            # full softmax
 python scripts/evaluate_pools.py --tag charlm-small --lm-field lm_homo
 OMP_NUM_THREADS=1 python scripts/bench_cpu_charlm.py --models outputs/charlm/small --int8 --variants full
 CUDA_VISIBLE_DEVICES="" python scripts/bench_ime_keys.py --settle-ms 400 \
-    --server-args "--reranker outputs/charlm/small --reranker-type charlm --int8 --fusion-a 0.3 --fusion-beta 1.0 --fusion-mu 0.1"
+    --server-args "--reranker outputs/charlm/small --reranker-type charlm --int8"
 ```
