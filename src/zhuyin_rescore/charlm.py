@@ -128,9 +128,11 @@ class CharLM(nn.Module):
         if isinstance(m, nn.Linear | nn.Embedding):
             nn.init.normal_(m.weight, std=0.02)
 
-    def hidden(self, ids, pos_offset: int = 0, past=None, mask=None):
+    def hidden(self, ids, pos_offset: int = 0, past=None, mask=None, positions=None):
         t = ids.shape[1]
-        pos = torch.arange(pos_offset, pos_offset + t, device=ids.device)
+        pos = positions
+        if pos is None:
+            pos = torch.arange(pos_offset, pos_offset + t, device=ids.device)
         x = self.emb(ids) + self.pos(pos)
         new_past = []
         for i, blk in enumerate(self.blocks):
@@ -180,6 +182,15 @@ class CharLMScorer:
         self._ctx_key: str | None = None
         self._ctx_cache = None
 
+    def quantize_dynamic_int8(self) -> None:
+        """int8 dynamic quantization of the transformer's Linear layers (CPU).
+
+        The tied embedding and output projection stay in fp32.
+        """
+        quantize = torch.ao.quantization.quantize_dynamic
+        self.model = quantize(self.model, {nn.Linear}, dtype=torch.qint8)
+        self._ctx_key, self._ctx_cache = None, None
+
     def context_ids(self, context: str) -> list[int]:
         return [BOS] + self.vocab.encode(context)[-self.context_chars :]
 
@@ -206,13 +217,73 @@ class CharLMScorer:
         causal = torch.ones(w, w, dtype=torch.bool, device=self.device).tril()
         return torch.cat([torch.ones(w, p, dtype=torch.bool, device=self.device), causal], dim=1)
 
+    def _trie(self, candidates: list[str]):
+        """Unique prefixes of the candidates: char id, parent node, depth, and
+        each candidate's path of nodes."""
+        index: dict[tuple[int, ...], int] = {}
+        chars, parent, depth, paths = [], [], [], []
+        for cand in candidates:
+            prefix: tuple[int, ...] = ()
+            prev, path = -1, []
+            for t, tok in enumerate(self.vocab.encode_chars(cand)):
+                prefix += (tok,)
+                j = index.get(prefix)
+                if j is None:
+                    j = index[prefix] = len(chars)
+                    chars.append(tok)
+                    parent.append(prev)
+                    depth.append(t)
+                path.append(j)
+                prev = j
+            paths.append(path)
+        return chars, parent, depth, paths
+
+    @torch.inference_mode()
+    def _tree_states(self, context: str, candidates: list[str], cache=None):
+        """One forward over the prefix trie (tree attention).
+
+        Every unique prefix is one token; it attends to the context and to its
+        own ancestors only, so shared prefixes are computed once. Returns the
+        predicting state for each node (its parent's output, or the context's
+        last state for depth 0) plus the trie.
+        """
+        past, last_h, p = cache if cache is not None else self.context_cache(context)
+        chars, parent, depth, paths = self._trie(candidates)
+        n = len(chars)
+        anc = np.zeros((n, n), dtype=bool)
+        for i in range(n):
+            j = i
+            while j >= 0:
+                anc[i, j] = True
+                j = parent[j]
+        mask = torch.cat([torch.ones(n, p, dtype=torch.bool), torch.from_numpy(anc)], dim=1).to(self.device)
+        ids = torch.tensor([chars], device=self.device)
+        positions = torch.tensor(depth, device=self.device) + p
+        h, _ = self.model.hidden(ids, past=past, mask=mask, positions=positions)
+        states = torch.cat([last_h[0], h[0]])  # row 0: context state, row i + 1: node i
+        pred = np.asarray(parent) + 1
+        uniq, row = np.unique(pred, return_inverse=True)
+        return states[torch.from_numpy(uniq).to(self.device)], row, chars, depth, paths
+
+    @staticmethod
+    def _sum_paths(node_lp: np.ndarray, paths: list[list[int]]) -> list[float]:
+        return [float(node_lp[path].sum()) for path in paths]
+
     @torch.inference_mode()
     def score_cached(self, context: str, candidates: list[str], cache=None) -> list[float]:
-        """Full softmax log P(candidate | context)."""
+        """Full softmax log P(candidate | context), prefix sharing via a trie."""
         if not candidates:
             return []
-        if len({len(c) for c in candidates}) > 1:
-            return [self.score_cached(context, [c], cache)[0] for c in candidates]
+        pred_states, row, chars, _, paths = self._tree_states(context, candidates, cache)
+        lsm = torch.log_softmax(pred_states @ self.model.emb.weight.T, dim=-1)
+        node_lp = lsm[torch.from_numpy(row), torch.tensor(chars)].cpu().numpy()
+        return self._sum_paths(node_lp, paths)
+
+    @torch.inference_mode()
+    def score_cached_flat(self, context: str, candidates: list[str], cache=None) -> list[float]:
+        """Reference: full softmax without prefix sharing (equal length candidates)."""
+        if not candidates:
+            return []
         h, ids = self._hidden(context, candidates, cache)
         lp = torch.log_softmax(h @ self.model.emb.weight.T, dim=-1)
         return lp.gather(-1, ids.unsqueeze(-1)).squeeze(-1).sum(-1).tolist()
@@ -232,20 +303,25 @@ class CharLMScorer:
         """log P(candidate | context, readings): softmax over each position's homophones."""
         if not candidates:
             return []
-        h, ids = self._hidden(context, candidates, cache)
-        k, n = ids.shape
-        cand = ids.cpu().numpy()
+        pred_states, row, chars, depth, paths = self._tree_states(context, candidates, cache)
+        n_pos = max(depth) + 1
+        chars_a, depth_a = np.asarray(chars), np.asarray(depth)
         sets = [
-            np.union1d(self._homophone_ids(syllables[t]) if t < len(syllables) else cand[:0, t], cand[:, t])
-            for t in range(n)
+            np.union1d(
+                self._homophone_ids(syllables[t]) if t < len(syllables) else chars_a[:0],
+                chars_a[depth_a == t],
+            )
+            for t in range(n_pos)
         ]
         union = np.unique(np.concatenate(sets))
-        member = torch.zeros(n, len(union), dtype=torch.bool)
+        member = np.zeros((n_pos, len(union)), dtype=bool)
         for t, st in enumerate(sets):
-            member[t, torch.from_numpy(np.searchsorted(union, st))] = True
-        member = member.to(self.device)
-        logits = h @ self.model.emb.weight[torch.from_numpy(union).to(self.device)].T  # (K, n, |union|)
-        z = torch.logsumexp(logits.masked_fill(~member[None], -math.inf), dim=-1)
-        target = torch.from_numpy(np.searchsorted(union, cand)).to(self.device)
-        tl = logits.gather(-1, target.unsqueeze(-1)).squeeze(-1)
-        return torch.clamp(tl - z, min=HOMO_FLOOR).sum(-1).tolist()
+            member[t, np.searchsorted(union, st)] = True
+        logits = pred_states @ self.model.emb.weight[torch.from_numpy(union).to(self.device)].T
+        node_logits = logits[torch.from_numpy(row)]  # (nodes, |union|)
+        node_member = torch.from_numpy(member[depth_a]).to(self.device)
+        z = torch.logsumexp(node_logits.masked_fill(~node_member, -math.inf), dim=-1)
+        col = torch.from_numpy(np.searchsorted(union, chars_a)).to(self.device)
+        target = node_logits.gather(-1, col.unsqueeze(-1)).squeeze(-1)
+        node_lp = torch.clamp(target - z, min=HOMO_FLOOR).cpu().numpy()
+        return self._sum_paths(node_lp, paths)

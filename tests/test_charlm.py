@@ -76,5 +76,15 @@ def test_candidates_keep_their_length(scorer):
     assert all(math.isfinite(x) for x in scores)
 
 
+@pytest.mark.parametrize("context", ["他說，", ""])
+def test_tree_scoring_matches_flat(scorer, context):
+    cands = ["我明天再去", "我明天在去", "我明天再來", "他明天再去"]
+    tree = scorer.score_cached(context, cands)
+    assert tree == pytest.approx(scorer.score_cached_flat(context, cands), abs=1e-4)
+    # Different lengths are fine with the trie.
+    mixed = scorer.score_cached(context, ["我明天", "我明天再去"])
+    assert mixed[0] == pytest.approx(reference(scorer, context, "我明天"), abs=1e-4)
+
+
 def test_bos_is_first(scorer):
     assert scorer.context_ids("")[0] == BOS
