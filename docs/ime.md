@@ -45,16 +45,27 @@ python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw --graph  # p
 --fusion-beta 2`) are tuned for the zh-TW model; use about `--fusion-a 0.75`
 with the base Qwen model.
 
-Measured by typing 200 Common Voice dev sentences through the server
-(`scripts/bench_ime_keys.py`, RTX 5090 for the reranker):
+CPU only (no GPU), with the 16M character LM reranker
+([results-cpu-reranker.md](results-cpu-reranker.md)):
 
-| server | key latency p50 / p95 / max | sentences correct, with tones | toneless |
+```bash
+python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8 \
+    --fusion-a 0.3 --fusion-beta 1.0
+```
+
+Measured by typing 200 Common Voice dev sentences through the server
+(`scripts/bench_ime_keys.py`):
+
+| server | key latency p95 | sentences correct, with tones | toneless |
 | --- | --- | --- | --- |
-| decoder only (CPU) | 0.07 / 3.0 / 5.5 ms | 79.5% | 69.0% |
-| + zh-TW reranker, CUDA graph | 0.17 / 5.5 / 9.7 ms | 83.0% | 72.0% |
+| decoder only (CPU) | 2.9 ms | 80.0% | 72.0% |
+| + char LM 16M int8 reranker (CPU, 1 thread) | 5.4 ms | 83.0% | 75.0% |
+| + Qwen2.5-0.5B zh-TW reranker, CUDA graph (RTX 5090) | 5.5 ms | 83.5% | 76.0% |
 
 The reranker runs in its own thread and pushes its result about 100 ms
-(debounce) after the last syllable, so keystrokes never wait for it.
+(debounce) after the last syllable, so keystrokes never wait for it. Enter
+commits and also ends the line in the context history, so the next sentence
+starts fresh.
 
 The server lowers its own priority (`--nice 5`), uses one CPU thread for
 the reranker, and sleeps in `recv` when idle.

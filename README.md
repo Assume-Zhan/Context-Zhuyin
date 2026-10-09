@@ -8,6 +8,7 @@ top-k candidate sentences on the CPU, and a small resident causal LM (Qwen
 - Results: [docs/results-phase1.md](docs/results-phase1.md) (against libchewing
   0.14, five domains), [docs/results.md](docs/results.md) (phase 0, against
   0.13.1)
+- CPU only reranker (small character LM): [docs/results-cpu-reranker.md](docs/results-cpu-reranker.md)
 - Linux input method (IBus): [docs/ime.md](docs/ime.md)
 - Code: `src/zhuyin_rescore/` (libchewing wrapper, candidate generation,
   char n-gram and lattice decoder, LM scorer, metrics), `src/zhuyin_ime/`
