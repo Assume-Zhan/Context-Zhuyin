@@ -26,6 +26,8 @@ def main() -> None:
     ap.add_argument("--requests", type=int, default=300)
     ap.add_argument("--threads", nargs="+", type=int, default=[1, 2])
     ap.add_argument("--out", default="outputs/bench/cpu_charlm.json")
+    ap.add_argument("--int8", action="store_true", help="also time int8 dynamic quantization")
+    ap.add_argument("--variants", nargs="+", default=["full", "homophone"])
     args = ap.parse_args()
 
     import torch
@@ -39,10 +41,16 @@ def main() -> None:
     rows = [json.loads(line) for line in open(args.candidates)][: args.requests]
     rows = [r for r in rows if len(r["beam"]) >= 2]
     report = {"runs": []}
-    for path in args.models:
+    jobs = [(path, False) for path in args.models]
+    if args.int8:
+        jobs += [(path, True) for path in args.models]
+    reference: dict[str, list[int]] = {}
+    for path, int8 in jobs:
         scorer = CharLMScorer(path, device="cpu", homophones=homophones)
         params = sum(p.numel() for p in scorer.model.parameters())
-        for variant in ("full", "homophone"):
+        if int8:
+            scorer.quantize_dynamic_int8()
+        for variant in args.variants:
             for threads in args.threads:
                 torch.set_num_threads(threads)
                 lat, cpu, best = [], [], []
@@ -61,10 +69,14 @@ def main() -> None:
                         lat.append((t1 - t0) * 1000)
                         cpu.append((c1.ru_utime - c0.ru_utime + c1.ru_stime - c0.ru_stime) * 1000)
                     best.append(int(np.argmax(scores)))
+                ref = reference.setdefault(f"{path}|{variant}", best)
+                agree = float(np.mean([a == b for a, b in zip(best, ref, strict=True)]))
                 run = {
                     "model": path,
                     "params_m": round(params / 1e6, 2),
+                    "int8": int8,
                     "variant": variant,
+                    "best_agrees_with_fp32": round(agree, 4),
                     "threads": threads,
                     "p50_ms": round(float(np.percentile(lat, 50)), 2),
                     "p95_ms": round(float(np.percentile(lat, 95)), 2),

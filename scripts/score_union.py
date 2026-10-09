@@ -78,6 +78,8 @@ def main() -> None:
     ap.add_argument("--chunk", type=int, default=32, help="candidates per forward, bounds GPU memory")
     ap.add_argument("--scorer", default="qwen", choices=["qwen", "charlm"])
     ap.add_argument("--device", default="cuda")
+    ap.add_argument("--int8", action="store_true", help="charlm on the CPU: int8 dynamic quantization")
+    ap.add_argument("--threads", type=int, default=1, help="torch CPU threads")
     args = ap.parse_args()
     tag = args.tag or f"{args.model.rstrip('/').split('/')[-1]}-{args.dtype}"
 
@@ -88,7 +90,10 @@ def main() -> None:
         from zhuyin_rescore.charlm import CharLMScorer
         from zhuyin_rescore.lexicon import Lexicon, load_entries
 
+        torch.set_num_threads(args.threads)
         scorer = CharLMScorer(args.model, device=args.device)
+        if args.int8:
+            scorer.quantize_dynamic_int8()
         entries = load_entries()
         for cond in args.conditions:
             lex = Lexicon(entries, cond)
