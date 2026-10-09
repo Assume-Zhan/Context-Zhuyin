@@ -310,8 +310,10 @@ class Session:
                 "End": n,
             }[name]
             return self._state()
-        if name == "Down" and self.syllables and self.composer.empty():
-            return self._open_candidates()
+        if name in ("Up", "Down", "Page_Up", "Page_Down") and self._busy():
+            if name == "Down" and self.syllables and self.composer.empty():
+                return self._open_candidates()
+            return self._state()  # a stray arrow or page key must not commit the preedit
         if self._busy():
             # Any other printable key: commit what we have and let it through.
             commit = self._commit_all()

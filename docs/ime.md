@@ -99,6 +99,7 @@ desktop input source settings and ibus-daemon starts it on demand.
 | Down / Up (window open) | move the highlight; past the last or first item, turn the page |
 | Enter (window open) | pick the highlighted candidate |
 | Space, Page Down / Page Up | next / previous candidate page |
+| Up, Page keys (window closed), Down while composing a syllable | ignored while there is a preedit, so a stray key never commits it |
 | Enter | commit the preedit |
 | BackSpace / Delete | delete a symbol or a syllable |
 | Left / Right / Home / End | move the cursor between syllables |

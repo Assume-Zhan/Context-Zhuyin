@@ -206,3 +206,18 @@ def test_rerank_per_segment_survives_typing_after_punctuation(engine):
     assert st.preedit.startswith(kbest[1].text + "，")  # the first segment keeps its choice
     key2, context, _, syllables2 = s.rerank_request()
     assert syllables2 == ["ㄗㄞ"] and context.endswith(kbest[1].text + "，")
+
+
+def test_arrow_and_page_keys_never_commit(engine):
+    from zhuyin_ime.session import Key
+
+    s = engine.new_session()
+    assert not s.process_key(Key(name="Up")).handled  # nothing typed: the application gets it
+    type_keys(s, "ji3au/6wu0 ")
+    for name in ("Up", "Page_Up", "Page_Down"):
+        st = s.process_key(Key(name=name))
+        assert st.handled and st.commit == "" and st.preedit == "我明天" and not st.candidates
+    st = type_keys(s, "a")  # a syllable still being composed
+    for name in ("Down", "Up"):
+        st = s.process_key(Key(name=name))
+        assert st.handled and st.commit == "" and st.preedit == "我明天ㄇ" and not st.candidates
