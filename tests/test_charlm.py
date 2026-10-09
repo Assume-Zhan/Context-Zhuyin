@@ -58,7 +58,7 @@ def test_cached_scores_match_full_forward(scorer, context):
 def test_homophone_normalization(scorer):
     syl = ["ㄨㄛˇ", "ㄇㄧㄥˊ", "ㄊㄧㄢ", "ㄗㄞˋ"]
     a, b = scorer.score_homophone("", ["我明天再", "我明天在"], syl)
-    # Only position 4 differs; within {再, 在} the two probabilities sum to one.
+    # Only position 4 differs; over its two homophones the probabilities sum to one.
     assert math.exp(a) + math.exp(b) == pytest.approx(
         math.exp(a) / math.exp(scorer.score_homophone("", ["我明天"], syl[:3])[0])
         + math.exp(b) / math.exp(scorer.score_homophone("", ["我明天"], syl[:3])[0]),
