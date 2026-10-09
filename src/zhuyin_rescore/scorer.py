@@ -35,9 +35,11 @@ class LMScorer:
         torch.set_num_threads(1)
         self.device = torch.device(device)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = (
-            AutoModelForCausalLM.from_pretrained(model_name, dtype=DTYPES[dtype]).to(self.device).eval()
-        )
+        # Load straight onto the device: a CPU copy moved over afterwards
+        # leaves its size in freed but resident heap memory.
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name, dtype=DTYPES[dtype], device_map=str(self.device)
+        ).eval()
         self.decoder = self.model.get_decoder()
         self.lm_head = self.model.get_output_embeddings()
         self.max_context_tokens = max_context_tokens

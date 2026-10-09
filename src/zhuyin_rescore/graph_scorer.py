@@ -20,7 +20,7 @@ from zhuyin_rescore.scorer import LMScorer
 
 
 class GraphScorer:
-    def __init__(self, scorer: LMScorer, k_max: int = 32, w_max: int = 24, p_max: int = 72):
+    def __init__(self, scorer: LMScorer, k_max: int = 32, w_max: int = 24, p_max: int = 72, chunk: int = 4):
         if scorer.device.type != "cuda":
             raise ValueError("GraphScorer needs a CUDA device")
         self.scorer = scorer
@@ -36,6 +36,7 @@ class GraphScorer:
         self.head_dim = cfg.hidden_size // cfg.num_attention_heads
         self.eps = cfg.rms_norm_eps
         self.k_max, self.w_max, self.p_max = k_max, w_max, p_max
+        self.chunk = chunk
         dev, dt = scorer.device, next(model.parameters()).dtype
         self.dtype = dt
         n_layers = len(self.layers)
@@ -93,9 +94,16 @@ class GraphScorer:
         x = self._rms(x, self.norm.weight)
         # Token t is predicted by the state before it; the first by the context.
         h = torch.cat([self.last_hidden.expand(k, 1, -1), x[:, :-1]], dim=1)
-        lp = torch.log_softmax(self.lm_head(h).float(), dim=-1)
-        lp = lp.gather(-1, self.cand_ids.unsqueeze(-1)).squeeze(-1)
-        return (lp * self.cand_mask).sum(-1)
+        # Normalize a few candidates at a time: the logits of all of them
+        # (k x w x 152k, in fp32) would be the largest buffer of the graph.
+        out = []
+        for i in range(0, k, self.chunk):
+            logits = self.lm_head(h[i : i + self.chunk]).float()
+            ids = self.cand_ids[i : i + self.chunk].unsqueeze(-1)
+            lp = logits.gather(-1, ids).squeeze(-1) - torch.logsumexp(logits, dim=-1)
+            del logits
+            out.append((lp * self.cand_mask[i : i + self.chunk]).sum(-1))
+        return torch.cat(out)
 
     # -------------------------------------------------------------- interface
     @torch.inference_mode()
@@ -124,6 +132,8 @@ class GraphScorer:
         self.graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(self.graph):
             self.out = self._forward()
+        # The eager warm-up forwards left blocks in the regular pool.
+        torch.cuda.empty_cache()
 
     @torch.inference_mode()
     def score(self, context: str, candidates: list[str]) -> list[float]:
