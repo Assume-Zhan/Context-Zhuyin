@@ -114,7 +114,8 @@ def test_rerank_applies_only_to_current_version(engine):
     type_keys(s, "ji au/ wu0 ")
     req = s.rerank_request()
     assert req is not None
-    version, _, kbest = req
+    version, _, kbest, syllables = req
+    assert len(syllables) == 3
     scores = [0.0] * len(kbest)
     scores[1] = 1000.0  # force the second candidate
     st = s.apply_rerank(version, scores)

@@ -293,10 +293,11 @@ class Session:
         return self._state(commit=commit)
 
     # ---------------------------------------------------------------- reranking
-    def rerank_request(self) -> tuple[int, str, list[Decoded]] | None:
+    def rerank_request(self) -> tuple[int, str, list[Decoded], list[str]] | None:
+        """(version, history, k-best, typed syllables) for the reranker."""
         if len(self.kbest) < 2:
             return None
-        return self.version, self.history[-HISTORY_CHARS:], list(self.kbest)
+        return self.version, self.history[-HISTORY_CHARS:], list(self.kbest), list(self.syllables)
 
     def apply_rerank(self, version: int, lm_scores: list[float]) -> State | None:
         """Fuse LM scores with the decoder's n-gram scores; None if stale."""

@@ -28,8 +28,11 @@ from zhuyin_ime.session import Engine, Key, Session, State
 class Reranker:
     """Debounced LM reranking shared by all sessions."""
 
-    def __init__(self, scorer, debounce_ms: float = 100.0):
+    def __init__(self, scorer, debounce_ms: float = 100.0, homophone: bool = False):
+        """homophone: call scorer.score_homophone with the typed syllables
+        (character LM with homophone normalization) instead of score_cached."""
         self.scorer = scorer
+        self.homophone = homophone
         self.debounce = debounce_ms / 1000.0
         self.cond = threading.Condition()
         self.pending: dict[int, tuple[float, Connection]] = {}
@@ -58,10 +61,14 @@ class Reranker:
                 req = conn.session.rerank_request()
             if req is None:
                 continue
-            version, history, kbest = req
+            version, history, kbest, syllables = req
             t0 = time.perf_counter()
+            texts = [d.text for d in kbest]
             try:
-                scores = self.scorer.score_cached(history[-64:], [d.text for d in kbest])
+                if self.homophone:
+                    scores = self.scorer.score_homophone(history[-64:], texts, syllables)
+                else:
+                    scores = self.scorer.score_cached(history[-64:], texts)
             except Exception as exc:  # never take the IME down because of the reranker
                 print(f"reranker error: {exc}", flush=True)
                 continue
@@ -175,6 +182,22 @@ def build_scorer(model: str, device: str, dtype: str, threads: int, graph: bool 
     return scorer
 
 
+def build_charlm_scorer(path: str, engine: Engine, threads: int):
+    os.environ.setdefault("OMP_NUM_THREADS", str(threads))
+    os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
+    import torch
+
+    from zhuyin_rescore.charlm import CharLMScorer
+
+    torch.set_num_threads(threads)
+    lexicon = engine.lexicon
+
+    def homophones(syl: str) -> list[str]:
+        return [p for p, _ in lexicon.lookup_span((syl,))]
+
+    return CharLMScorer(path, device="cpu", homophones=homophones)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Zhuyin IME conversion server")
     ap.add_argument("--socket", default="outputs/run/zhuyin-ime.sock")
@@ -186,6 +209,8 @@ def main() -> None:
     ap.add_argument("--dtype", default="float16")
     ap.add_argument("--threads", type=int, default=1, help="CPU threads for the reranker")
     ap.add_argument("--graph", action="store_true", help="replay the scoring forward as a CUDA graph")
+    ap.add_argument("--reranker-type", default="qwen", choices=["qwen", "charlm"], help="charlm: CPU")
+    ap.add_argument("--normalizer", default="homophone", choices=["homophone", "full"], help="charlm only")
     ap.add_argument("--debounce-ms", type=float, default=100.0)
     # Fusion score = lm + a * ngram - beta * [not the decoder 1-best]; tuned on
     # dev for the zh-TW model (use about a=0.75 with the base Qwen model).
@@ -197,7 +222,10 @@ def main() -> None:
     os.nice(args.nice)
     engine = build_engine(args.ngram, args.dict_dir, args.beam, (args.fusion_a, args.fusion_beta))
     reranker = None
-    if args.reranker:
+    if args.reranker and args.reranker_type == "charlm":
+        scorer = build_charlm_scorer(args.reranker, engine, args.threads)
+        reranker = Reranker(scorer, args.debounce_ms, homophone=args.normalizer == "homophone")
+    elif args.reranker:
         scorer = build_scorer(args.reranker, args.device, args.dtype, args.threads, args.graph)
         reranker = Reranker(scorer, args.debounce_ms)
     print(f"zhuyin-ime server on {args.socket} (reranker: {args.reranker or 'off'})", flush=True)
