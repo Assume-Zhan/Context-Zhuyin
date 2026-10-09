@@ -112,7 +112,8 @@ To stop it: `dz pkill -f zhuyin_ime.server`.
 
 Without Docker, the decoder-only server runs on the host with Python 3.10+
 and numpy, once `outputs/dict/` and `outputs/ngram/zhtw-o4` exist (the CPU
-reranker additionally needs a CPU build of PyTorch):
+reranker additionally needs a CPU build of PyTorch, and the libchewing 0.14
+n-best a libchewing 0.14 build, which the dev container provides):
 
 ```bash
 PYTHONPATH=src python3 -m zhuyin_ime.server

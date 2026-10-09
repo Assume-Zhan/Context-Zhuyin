@@ -108,6 +108,8 @@ class ZhuyinLmEngine(IBus.Engine):
 
     # ---------------------------------------------------------------- drawing
     def _apply(self, st: dict) -> None:
+        if st.get("op") != "state":
+            return  # e.g. a stats reply; nothing to draw
         self.version = max(self.version, st.get("version", 0))
         if st.get("commit"):
             self.commit_text(IBus.Text.new_from_string(st["commit"]))

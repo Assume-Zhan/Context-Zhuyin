@@ -131,3 +131,6 @@ def test_pool_policy():
     builder = PoolBuilder()
     assert builder.build(texts, ["ㄨㄛ", "ㄇㄧㄥ"]) == (OPEN, texts[:30])
     assert builder.build(texts, ["ㄨㄛˇ", "ㄇㄧㄥˊ"]) == (TONED, texts[:30])
+    # Boundary: half the syllables marked counts as typed with tones.
+    assert typed_with_tones(["ㄨㄛˇ", "ㄇㄧㄥ"])
+    assert not typed_with_tones(["ㄨㄛ"])
