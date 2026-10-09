@@ -84,6 +84,9 @@ sets per condition and pool.
 
 ## CPU latency
 
+(The IME now runs this model on ONNX Runtime, which is faster still and
+does not load torch; see [ime.md](ime.md#memory).)
+
 One rerank call for the decoder 10-best (about 95 candidate characters),
 context cache resident, 1 thread, 300 dev clauses:
 

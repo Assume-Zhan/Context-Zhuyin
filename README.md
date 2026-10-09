@@ -56,7 +56,7 @@ docker compose -f docker/docker-compose.yml exec phonetic-candidate-dev bash
 
 ### 2. Prepare the models (once)
 
-Skip this step if `outputs/ngram/zhtw-o4` (and the rerankers you want)
+Skip this step if `outputs/ngram/zhtw-o4-q16` (and the rerankers you want)
 already exist.
 
 ```bash
@@ -69,10 +69,12 @@ python scripts/build_train_text.py       # drops training documents that contain
 
 # Required: the character 4-gram used by the decoder (about 3 minutes, CPU)
 python scripts/train_ngram.py            # -> outputs/ngram/zhtw-o4
+python scripts/compact_ngram.py --out outputs/ngram/zhtw-o4-q16   # smaller form the server loads
 
 # Optional: CPU reranker, 16M character LM (about 6 minutes on a GPU)
 python scripts/prepare_charlm_data.py
 python scripts/train_charlm.py --out outputs/charlm/small --d-model 384 --layers 6 --heads 6 --d-ff 1536
+python scripts/export_charlm_onnx.py outputs/charlm/small   # ONNX Runtime graphs for the server
 
 # Optional: GPU reranker, Qwen2.5-0.5B with zh-TW continued pretraining
 # (about 3 hours on an RTX 5090)
@@ -93,7 +95,8 @@ the terminal; keep that shell open while you use the input method (append
 # Decoder only (CPU, needs no reranker model)
 python -m zhuyin_ime.server
 
-# CPU reranker: 16M character LM, int8, one thread
+# CPU reranker: 16M character LM on ONNX Runtime, int8, one thread
+# (without --int8: exact fp32 scores, same speed, 0.1 GB more memory)
 python -m zhuyin_ime.server --reranker outputs/charlm/small --reranker-type charlm --int8
 
 # GPU reranker: Qwen2.5-0.5B zh-TW, replayed as a CUDA graph
@@ -108,12 +111,19 @@ before that, add `--chewing-lib outputs/libchewing-0.14/lib/libchewing.so.3
 out: the pool is then the decoder's own). Add `--pool-k 10` to keep the CPU
 reranker's p95 latency under 50 ms at a small cost in toneless accuracy.
 
+Resident memory on the dev host after typing 200 sentences: about 0.8 GB
+decoder only, 0.95 GB with the CPU reranker, 2.6 GB plus 1.9 GB of GPU memory
+with the GPU reranker. About 0.7 GB of it is the memory mapped n-gram, which
+the kernel can reclaim (at the cost of slower lookups afterwards). Details:
+[docs/ime.md](docs/ime.md#memory).
+
 To stop it: Ctrl+C, or `pkill -f zhuyin_ime.server` in the container.
 
 Without Docker, the decoder-only server runs on the host with Python 3.10+
-and numpy, once `outputs/dict/` and `outputs/ngram/zhtw-o4` exist (the CPU
-reranker additionally needs a CPU build of PyTorch, and the libchewing 0.14
-n-best a libchewing 0.14 build, which the dev container provides):
+and numpy, once `outputs/dict/` and `outputs/ngram/zhtw-o4-q16` exist (the
+CPU reranker additionally needs `pip install onnxruntime` and the ONNX files
+exported in step 2, no PyTorch; the libchewing 0.14 n-best needs a libchewing
+0.14 build, which the dev container provides):
 
 ```bash
 PYTHONPATH=src python3 -m zhuyin_ime.server
@@ -170,7 +180,8 @@ sudo rm -f /usr/share/ibus/component/zhuyin-lm.xml && ibus restart
 ## Repository
 
 - `src/zhuyin_rescore/`: libchewing wrapper, lexicon, character n-gram and
-  lattice beam decoder, LM scorers (Qwen, CUDA graph, character LM), metrics
+  lattice beam decoder, LM scorers (Qwen, CUDA graph, character LM on torch
+  and ONNX Runtime), metrics
 - `src/zhuyin_ime/`: input method engine, conversion server, IBus front end
 - `scripts/`: data, training, evaluation and benchmark entry points
 - `tests/`: unit tests and a headless IBus end to end test
