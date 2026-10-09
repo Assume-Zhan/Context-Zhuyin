@@ -53,6 +53,29 @@ def test_unknown_char_gets_floor(model):
     assert model.unk_logp < model.logp(ctx, np.array(model.ids("我")))[0]
 
 
+def test_compact_matches_counts(model, tmp_path):
+    texts = ["我明天再去學校", "我明天在去學校", "他在家", "校學去再天明我", "我在學"]
+    ref = model.score_batch(texts, history="他說我")
+    small = model.compact()
+    assert small.keys[1].dtype == np.uint32 and small.counts is None
+    assert small.score_batch(texts, history="他說我") == pytest.approx(ref, abs=0.05)
+    small.save(tmp_path / "c")
+    loaded = CharNgram.load(tmp_path / "c")
+    assert loaded.score_batch(texts, history="他說我") == pytest.approx(ref, abs=0.05)
+    # Truncating the order works on the compact form too.
+    model.save(tmp_path / "m")
+    bigram = CharNgram.load(tmp_path / "m", order=2).score_batch(texts)
+    assert CharNgram.load(tmp_path / "c", order=2).score_batch(texts) == pytest.approx(bigram, abs=0.05)
+
+
+def test_compact_pruning_backs_off(model):
+    pruned = model.compact(min_count={3: 4, 4: 4})  # counts here are multiples of 3
+    assert len(pruned.keys[3]) < len(model.keys[3])
+    # Every kept 4-gram keeps its score; dropped ones back off to a lower order.
+    texts = ["我明天再去學校", "他明天再來"]
+    assert np.all(np.isfinite(pruned.score_batch(texts)))
+
+
 def test_save_load_truncates_order(model, tmp_path):
     model.save(tmp_path / "m")
     m2 = CharNgram.load(tmp_path / "m", order=2)
