@@ -113,6 +113,7 @@ desktop input source settings and ibus-daemon starts it on demand.
 | Esc | close the candidate window, drop the syllable being composed, or clear |
 | Shift + `,` `.` `/` `1` `;` and `[` `]` `'` `\` | full width punctuation |
 | Ctrl + `,` `.` `;` (and Ctrl with the keys above) | full width comma, period, semicolon (and the same as above) |
+| Shift, tapped alone | switch between Chinese and English input (the top bar shows the mode) |
 
 Punctuation goes into the preedit like a syllable and is committed with it
 on Enter, so phrases before it can still be picked. It splits the input
@@ -120,6 +121,12 @@ into segments that are decoded separately, each with the text before it as
 context; the reranker scores the segments in order, and a segment keeps its
 reranked choice while typing continues after it. A syllable still being
 composed when punctuation is typed is finished without a tone.
+
+In English mode keys go straight to the application while there is no
+preedit; with a preedit, typed characters (letters, digits, space) join it
+like punctuation and are committed with it on Enter. Ctrl chords go to the
+application. The mode is shared by all windows; a Shift held longer than
+half a second or used with another key does not switch it.
 
 Committed text becomes the context for the next conversion (the n-gram sees
 its tail, the reranker the last 64 tokens).

@@ -174,8 +174,8 @@ converted as you type. Down opens the candidate window; Up and Down move the
 highlight and Enter picks it, or `1` to `9` pick directly (the choice is
 kept). Enter commits. Shift+`,` and Shift+`.`, or Ctrl+`,` and Ctrl+`.`, type
 full width punctuation, which stays in the preedit until Enter, so you can
-still pick phrases before it. The full key table is in
-[docs/ime.md](docs/ime.md).
+still pick phrases before it. Tap Shift to switch between Chinese and
+English. The full key table is in [docs/ime.md](docs/ime.md).
 
 ### Troubleshooting
 

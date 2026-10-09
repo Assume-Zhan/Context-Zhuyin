@@ -221,3 +221,22 @@ def test_arrow_and_page_keys_never_commit(engine):
     for name in ("Down", "Up"):
         st = s.process_key(Key(name=name))
         assert st.handled and st.commit == "" and st.preedit == "我明天ㄇ" and not st.candidates
+
+
+def test_english_mode(engine):
+    from zhuyin_ime.session import Key
+
+    s = engine.new_session()
+    assert not s.process_key(Key(char="a", english=True)).handled  # empty preedit: the application types it
+    type_keys(s, "ji3")
+    for ch in "OK ":
+        st = s.process_key(Key(char=ch, shift=ch != " ", english=True))
+    assert st.handled and st.preedit == "我OK " and st.commit == ""  # joins the preedit
+    assert not s.process_key(Key(char=",", ctrl=True, english=True)).handled  # Ctrl chords pass through
+    st = s.process_key(Key(name="BackSpace", english=True))
+    assert st.preedit == "我OK"
+    st = type_keys(s, "au/6")  # back in Chinese mode: ming2 after the English text
+    assert st.preedit.startswith("我OK") and len(st.preedit) == 4
+    preedit = st.preedit
+    st = s.process_key(Key(name="Return", english=True))
+    assert st.commit == preedit and st.preedit == ""

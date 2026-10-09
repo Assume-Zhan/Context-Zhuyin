@@ -39,6 +39,10 @@ def pump(seconds: float) -> None:
 def main() -> None:
     tmp = tempfile.mkdtemp(prefix="ibus-e2e-")
     env = dict(os.environ, PYTHONPATH=str(ROOT / "src"), HOME=tmp, XDG_CONFIG_HOME=tmp, XDG_CACHE_HOME=tmp)
+    # Ignore installed components (scripts/ibus/install.sh --system registers a
+    # zhuyin-lm engine that talks to the live server, not the one started here).
+    env["IBUS_COMPONENT_PATH"] = os.path.join(tmp, "component")
+    os.makedirs(env["IBUS_COMPONENT_PATH"])
     procs = []
     try:
         daemon = subprocess.Popen(
@@ -105,7 +109,14 @@ def main() -> None:
             tables.append({"cursor": table.get_cursor_pos(), "vertical": vertical})
 
         ic.connect("update-lookup-table", on_table)
-        caps = IBus.Capabilite.PREEDIT_TEXT | IBus.Capabilite.FOCUS | IBus.Capabilite.LOOKUP_TABLE
+        modes: list[str] = []
+        ic.connect("update-property", lambda _ic, prop: modes.append(prop.get_symbol().get_text()))
+        caps = (
+            IBus.Capabilite.PREEDIT_TEXT
+            | IBus.Capabilite.FOCUS
+            | IBus.Capabilite.LOOKUP_TABLE
+            | IBus.Capabilite.PROPERTY
+        )
         ic.set_capabilities(caps)
         ic.focus_in()
         ic.set_engine("zhuyin-lm")
@@ -137,7 +148,34 @@ def main() -> None:
         press(IBus.KEY_Return)
         press(IBus.KEY_Return)
         pump(0.3)
+
+        shift_up = IBus.ModifierType.SHIFT_MASK | IBus.ModifierType.RELEASE_MASK
+
+        def tap_shift() -> None:
+            ic.process_key_event(IBus.KEY_Shift_L, 0, 0)
+            ic.process_key_event(IBus.KEY_Shift_L, 0, shift_up)
+            pump(0.05)
+
+        # Tap Shift: English, and with nothing typed the key goes to the application.
+        tap_shift()
+        english_passthrough = not press(IBus.unicode_to_keyval("a"))
+        tap_shift()  # back to Chinese
+        for ch in "ji3":
+            press(IBus.unicode_to_keyval(ch))
+        # Shift used as a modifier (Shift+< for a comma) must not toggle.
+        ic.process_key_event(IBus.KEY_Shift_L, 0, 0)
+        press(IBus.KEY_less, IBus.ModifierType.SHIFT_MASK)
+        ic.process_key_event(IBus.KEY_Shift_L, 0, shift_up)
+        pump(0.05)
+        tap_shift()  # English letters join the preedit while it has text
+        for ch in "ok":
+            press(IBus.unicode_to_keyval(ch))
+        mixed_preedit = preedits[-1] if preedits else ""
+        press(IBus.KEY_Return)
+        tap_shift()
+        pump(0.3)
         result = {"commits": commits, "last_preedit": last_preedit, "comma_preedit": comma_preedit}
+        result |= {"english_passthrough": english_passthrough, "mixed_preedit": mixed_preedit, "modes": modes}
         print(json.dumps(result | {"table": table}, ensure_ascii=False))
     finally:
         for p in reversed(procs):

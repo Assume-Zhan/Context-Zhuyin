@@ -1,7 +1,8 @@
 """Conversion server: owns the engine and serves IME front ends over a Unix socket.
 
 Protocol: JSON lines. A front end sends requests with an integer "id"
-  {"op": "key", "id": 1, "char": "q", "name": "", "shift": false, "ctrl": false, "alt": false}
+  {"op": "key", "id": 1, "char": "q", "name": "", "shift": false, "ctrl": false, "alt": false,
+   "english": false}
   {"op": "reset", "id": 2}  {"op": "focus_out", "id": 3}  {"op": "ping", "id": 4}
 and gets one reply with the same id: {"op": "state", "id": 1, ...State fields}.
 When the LM reranker finds a better candidate for a segment of the current
@@ -115,6 +116,7 @@ class Connection:
                     shift=bool(msg.get("shift")),
                     ctrl=bool(msg.get("ctrl")),
                     alt=bool(msg.get("alt")),
+                    english=bool(msg.get("english")),
                 )
                 before = self.session.version
                 st = self.session.process_key(key)

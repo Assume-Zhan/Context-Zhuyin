@@ -5,6 +5,10 @@ the standard library and PyGObject with the IBus typelib. All conversion
 happens in the server (python -m zhuyin_ime.server), reachable through a
 Unix socket; if the server is down, keys pass through untouched.
 
+Tapping Shift alone switches between Chinese and English input; the mode is
+shared by all windows and shown as the InputMode property (GNOME Shell puts
+its symbol in the top bar).
+
 Run directly to register the engine on the running IBus bus (no root
 needed), then switch to it with `ibus engine zhuyin-lm`:
 
@@ -19,6 +23,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 
 import gi
 
@@ -55,11 +60,18 @@ MODIFIER_KEYS = {
     IBus.KEY_Meta_L, IBus.KEY_Meta_R, IBus.KEY_Caps_Lock,
 }  # fmt: skip
 
+SHIFT_KEYS = {IBus.KEY_Shift_L, IBus.KEY_Shift_R}
+# A Shift press and release with no other key in between, within this time,
+# toggles the mode; a longer hold (Shift+click, a change of mind) does not.
+SHIFT_TAP_SECONDS = 0.5
+MODE_SYMBOLS = {False: "中", True: "英"}
+
 SOCKET_PATH = DEFAULT_SOCKET
 
 
 class ZhuyinLmEngine(IBus.Engine):
     __gtype_name__ = "ZhuyinLmEngine"
+    english = False  # class level: one mode for every input context
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -69,6 +81,20 @@ class ZhuyinLmEngine(IBus.Engine):
         self.table.set_orientation(IBus.Orientation.VERTICAL)
         self.watch_id = 0
         self.version = 0
+        self.busy = False  # the last state had a preedit or candidates
+        self.shift_down_at = 0.0
+        self.mode_prop = IBus.Property(
+            key="InputMode",
+            prop_type=IBus.PropType.NORMAL,
+            label=IBus.Text.new_from_string(MODE_SYMBOLS[self.english]),
+            symbol=IBus.Text.new_from_string(MODE_SYMBOLS[self.english]),
+            tooltip=IBus.Text.new_from_string("Chinese / English (tap Shift)"),
+            sensitive=True,
+            visible=True,
+            state=IBus.PropState.UNCHECKED,
+        )
+        self.props = IBus.PropList()
+        self.props.append(self.mode_prop)
 
     # ------------------------------------------------------------ connection
     def _ensure_connected(self) -> bool:
@@ -111,6 +137,7 @@ class ZhuyinLmEngine(IBus.Engine):
     # ---------------------------------------------------------------- drawing
     def _apply(self, st: dict) -> None:
         self.version = max(self.version, st.get("version", 0))
+        self.busy = bool(st.get("preedit") or st.get("candidates"))
         if st.get("commit"):
             self.commit_text(IBus.Text.new_from_string(st["commit"]))
         preedit = st.get("preedit", "")
@@ -146,10 +173,35 @@ class ZhuyinLmEngine(IBus.Engine):
         self._apply_pushes()
         return st
 
+    # ------------------------------------------------------------------- mode
+    def _show_mode(self) -> None:
+        text = IBus.Text.new_from_string(MODE_SYMBOLS[ZhuyinLmEngine.english])
+        self.mode_prop.set_label(text)
+        self.mode_prop.set_symbol(text)
+        self.update_property(self.mode_prop)
+
+    def _toggle_mode(self) -> None:
+        ZhuyinLmEngine.english = not ZhuyinLmEngine.english
+        self._show_mode()
+
     # ----------------------------------------------------------------- events
     def do_process_key_event(self, keyval, keycode, state):
-        if state & IBus.ModifierType.RELEASE_MASK or keyval in MODIFIER_KEYS:
+        released = bool(state & IBus.ModifierType.RELEASE_MASK)
+        if keyval in SHIFT_KEYS:
+            # Let the application see Shift; toggle on a quick lone tap.
+            if not released:
+                self.shift_down_at = self.shift_down_at or time.monotonic()
+            else:
+                if self.shift_down_at and time.monotonic() - self.shift_down_at < SHIFT_TAP_SECONDS:
+                    self._toggle_mode()
+                self.shift_down_at = 0.0
             return False
+        if not released:
+            self.shift_down_at = 0.0  # Shift was a modifier for this key
+        if released or keyval in MODIFIER_KEYS:
+            return False
+        if ZhuyinLmEngine.english and not self.busy:
+            return False  # plain English typing never waits for the server
         name = SPECIAL_KEYS.get(keyval, "")
         char = ""
         if not name:
@@ -163,8 +215,17 @@ class ZhuyinLmEngine(IBus.Engine):
             shift=bool(state & IBus.ModifierType.SHIFT_MASK),
             ctrl=bool(state & IBus.ModifierType.CONTROL_MASK),
             alt=bool(state & IBus.ModifierType.MOD1_MASK),
+            english=ZhuyinLmEngine.english,
         )
         return bool(st and st.get("handled"))
+
+    def do_focus_in(self):
+        self.register_properties(self.props)
+        self._show_mode()  # another window may have switched the mode
+
+    def do_property_activate(self, prop_name, prop_state):
+        if prop_name == "InputMode":
+            self._toggle_mode()
 
     def do_focus_out(self):
         self._request("focus_out")

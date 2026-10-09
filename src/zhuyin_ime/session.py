@@ -2,10 +2,11 @@
 
 A session holds the syllables typed so far, the syllable being composed,
 the cursor, the phrases the user picked (locked spans), the candidate window
-and the committed history used as LM context. Punctuation stays in the
-preedit like a syllable until Enter, so earlier choices remain editable; it
-splits the input into segments that are decoded separately, each with the
-text before it as context. After every change the beam decoder updates the
+and the committed history used as LM context. Punctuation, and letters typed
+in English mode while there is a preedit, stay in the preedit like syllables
+until Enter, so earlier choices remain editable; they split the input into
+segments that are decoded separately, each with the text before it as
+context. After every change the beam decoder updates the
 segment being typed and the 1-best is shown right away; an optional LM
 reranker can later pick a better candidate for a segment (apply_rerank), as
 long as that segment has not changed in the meantime.
@@ -19,6 +20,7 @@ from zhuyin_ime.composer import TONE_KEYS, Composer
 from zhuyin_rescore.beam import BeamDecoder, Decoded, Weights
 from zhuyin_rescore.lexicon import Lexicon
 from zhuyin_rescore.ngram import CharNgram
+from zhuyin_rescore.zhuyin import SYMBOLS
 
 # Shifted or unused keys that type full width punctuation.
 PUNCTUATION = {
@@ -28,7 +30,6 @@ PUNCTUATION = {
 # With Ctrl held, keys that are bopomofo symbols on the Dai Chien layout type
 # punctuation too (Ctrl+, for a comma without reaching for Shift).
 CTRL_PUNCTUATION = {",": "，", ".": "。", ";": "；", **PUNCTUATION}
-MARKS = frozenset(CTRL_PUNCTUATION.values())
 PAGE_SIZE = 9
 HISTORY_CHARS = 200
 MAX_SYLLABLES = 40
@@ -41,6 +42,7 @@ class Key:
     shift: bool = False
     ctrl: bool = False
     alt: bool = False
+    english: bool = False  # typed in English mode (the front end toggles it with Shift)
 
 
 @dataclass
@@ -68,6 +70,11 @@ class Segment:
     kbest: list[Decoded]
     choice: int = 0  # index of the candidate shown in the preedit
     seen: bool = False  # already scored by the reranker
+
+
+def is_literal(token: str) -> bool:
+    """True for punctuation or English text in the preedit, False for a syllable."""
+    return token[0] not in SYMBOLS
 
 
 class Engine:
@@ -134,7 +141,7 @@ class Session:
         n = len(self.syllables)
         start = 0
         for i in range(n + 1):
-            if i < n and self.syllables[i] not in MARKS:
+            if i < n and not is_literal(self.syllables[i]):
                 continue
             if i > start:
                 locks = tuple(
@@ -193,18 +200,18 @@ class Session:
         (before any trailing punctuation), within one segment."""
         n = len(self.syllables)
         if self.cursor < n:
-            if self.syllables[self.cursor] in MARKS:
+            if is_literal(self.syllables[self.cursor]):
                 return self._state()
             end = self.cursor
-            while end < n and self.syllables[end] not in MARKS:
+            while end < n and not is_literal(self.syllables[end]):
                 end += 1
             spans = [(self.cursor, self.cursor + n_syl) for n_syl in range(min(6, end - self.cursor), 0, -1)]
         else:
             end = n
-            while end > 0 and self.syllables[end - 1] in MARKS:
+            while end > 0 and is_literal(self.syllables[end - 1]):
                 end -= 1
             start = end
-            while start > 0 and self.syllables[start - 1] not in MARKS:
+            while start > 0 and not is_literal(self.syllables[start - 1]):
                 start -= 1
             spans = [(end - length, end) for length in range(min(6, end - start), 0, -1)]
         items, seen = [], set()
@@ -257,15 +264,21 @@ class Session:
 
     # ---------------------------------------------------------------- key input
     def process_key(self, key: Key) -> State:
-        mark = "" if key.alt else (CTRL_PUNCTUATION if key.ctrl else PUNCTUATION).get(key.char, "")
+        table = CTRL_PUNCTUATION if key.ctrl else PUNCTUATION
+        mark = "" if key.alt or key.english else table.get(key.char, "")
         if (key.ctrl or key.alt) and not mark:
             return State(handled=False, preedit=self._state().preedit, version=self.version)
         if self.cand_items:
             return self._candidate_key(key)
 
         ch, name = key.char, key.name
+        if key.english and ch:
+            # English mode: text goes to the application, or into the preedit while it has text.
+            if not self._busy():
+                return State(handled=False, version=self.version)
+            return self._add_literal(ch)
         if mark:  # before the symbol keys: Ctrl+, is a comma, not the symbol on that key
-            return self._add_mark(mark)
+            return self._add_literal(mark)
         if ch and Composer.handles(ch) and not key.shift:
             if ch in TONE_KEYS:
                 return self._finish_syllable(TONE_KEYS[ch])
@@ -336,15 +349,16 @@ class Session:
             self._decode()
         return self._state(commit=commit)
 
-    def _add_mark(self, mark: str) -> State:
-        """Punctuation joins the preedit; a syllable still being composed is
-        finished without a tone first (dropped if it is not a syllable)."""
+    def _add_literal(self, text: str) -> State:
+        """Punctuation or an English character joins the preedit; a syllable
+        still being composed is finished without a tone first (dropped if it
+        is not a syllable)."""
         if not self.composer.empty():
             syl = self.composer.finish("")
             self.composer.clear()
             if syl is not None:
                 self.syllables.append(syl)
-        self.syllables.append(mark)
+        self.syllables.append(text)
         self.cursor = len(self.syllables)
         if len(self.syllables) > MAX_SYLLABLES:
             return self._state(commit=self._commit_all())
