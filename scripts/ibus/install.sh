@@ -32,7 +32,13 @@ if [ "${1:-}" = "--system" ]; then
     XML=/usr/share/ibus/component/zhuyin-lm.xml
     sed -e "s#@EXEC@#${LAUNCHER} --ibus#" "${REPO}/scripts/ibus/zhuyin-lm.xml.in" | sudo tee "${XML}" > /dev/null
     echo "wrote ${XML}; restarting ibus"
-    ibus restart || true
+    # Under GNOME, systemd owns ibus-daemon and `ibus restart` leaves it stopped.
+    GNOME_IBUS=org.freedesktop.IBus.session.GNOME.service
+    if systemctl --user is-active -q "${GNOME_IBUS}" 2>/dev/null; then
+        systemctl --user restart "${GNOME_IBUS}"
+    else
+        ibus restart || true
+    fi
     echo "Add 'Zhuyin LM' under Settings > Keyboard > Input Sources (Chinese (Taiwan))."
 else
     cat <<MSG
@@ -46,7 +52,7 @@ fi
 
 cat <<MSG
 
-Start the conversion server in the dev container (from the repo root on the host):
-  docker compose -f docker/docker-compose.yml exec phonetic-candidate-dev \\
-      python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw
+Start the conversion server in its container (from the repo root on the host;
+it restarts with Docker after that):
+  docker compose -f docker/docker-compose.yml up -d phonetic-candidate-ime
 MSG
