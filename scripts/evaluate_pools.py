@@ -158,11 +158,21 @@ def main() -> None:
     ap.add_argument("--out", default="outputs/reports")
     ap.add_argument("--save-errors", action="store_true", help="also save per example errors (npz)")
     ap.add_argument("--lm-field", default="lm", help="score column for the LM feature (lm or lm_homo)")
+    ap.add_argument(
+        "--fusion-json",
+        default=None,
+        help="also report rows with these fixed fusion weights (fusion.json of scripts/train_rerank.py)",
+    )
     args = ap.parse_args()
     global LM_FIELD
     LM_FIELD = args.lm_field
     report_tag = args.tag if args.lm_field == "lm" else f"{args.tag}.{args.lm_field}"
     all_errors: dict[str, np.ndarray] = {}
+    learned: dict[str, tuple] = {}
+    if args.fusion_json:
+        # Pool kind per condition, as in scripts/build_rerank_pools.py.
+        raw = json.loads(Path(args.fusion_json).read_text())
+        learned = {"full": tuple(raw["toned+chewing"]), "notone": tuple(raw["open"])}
 
     score_dir = Path(args.score_root) / args.tag
     meta = json.loads((score_dir / "meta.json").read_text()) if (score_dir / "meta.json").exists() else {}
@@ -198,6 +208,10 @@ def main() -> None:
                 params[name] = (a, beta, mu)
                 test_arrays = {d: pool_arrays(rs, policy, k, use_ctx) for d, rs in test.items()}
                 systems[name] = {d: select_errors(arr, a, beta, mu) for d, arr in test_arrays.items()}
+                if use_ctx and cond in learned:
+                    name = f"LM rerank, learned fusion {policy}@{k}"
+                    params[name] = learned[cond]
+                    systems[name] = {d: select_errors(arr, *learned[cond]) for d, arr in test_arrays.items()}
         base = systems["libchewing 0.14 (word bigram)"]
         cond_rep = {}
         header = "| system | " + " | ".join(args.domains) + " | mean | rel. | fixed / broken |"

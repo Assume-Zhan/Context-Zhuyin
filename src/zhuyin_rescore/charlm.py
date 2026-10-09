@@ -166,6 +166,12 @@ def load_charlm(path: str | Path, device: str = "cpu") -> tuple[CharLM, CharVoca
     return model.to(device).eval(), CharVocab.load(path / "vocab.json")
 
 
+def context_ids(vocab: CharVocab, context: str, context_chars: int) -> list[int]:
+    """BOS plus the last context_chars ids of the context; the scorer and the
+    reranker training both build the context this way."""
+    return [BOS] + vocab.encode(context)[-context_chars:]
+
+
 class CharLMScorer:
     """CPU friendly candidate scoring with a resident context cache.
 
@@ -196,7 +202,7 @@ class CharLMScorer:
         self._ctx_key, self._ctx_cache = None, None
 
     def context_ids(self, context: str) -> list[int]:
-        return [BOS] + self.vocab.encode(context)[-self.context_chars :]
+        return context_ids(self.vocab, context, self.context_chars)
 
     @torch.inference_mode()
     def context_cache(self, context: str):
