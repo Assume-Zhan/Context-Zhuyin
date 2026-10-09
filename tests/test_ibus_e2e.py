@@ -1,6 +1,8 @@
 import json
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +22,7 @@ def test_ibus_engine_end_to_end():
         capture_output=True,
         text=True,
         timeout=300,
+        env=dict(os.environ, ZHUYIN_SERVER_PYTHON=sys.executable),  # the server runs with numpy
     )
     lines = [ln for ln in out.stdout.splitlines() if ln.startswith("{")]
     assert lines, out.stdout + out.stderr

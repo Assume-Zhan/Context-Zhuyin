@@ -61,8 +61,11 @@ def main() -> None:
         os.environ["IBUS_ADDRESS"] = address
 
         sock = os.path.join(tmp, "ime.sock")
+        # The engine needs PyGObject (system Python); the server needs numpy,
+        # which may live in another interpreter (conda in the CUDA 12.4 image).
+        server_python = os.environ.get("ZHUYIN_SERVER_PYTHON", sys.executable)
         server = subprocess.Popen(
-            [sys.executable, "-m", "zhuyin_ime.server", "--socket", sock, "--nice", "0"],
+            [server_python, "-m", "zhuyin_ime.server", "--socket", sock, "--nice", "0"],
             env=env,
             cwd=ROOT,
             stdout=subprocess.PIPE,

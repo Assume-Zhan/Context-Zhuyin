@@ -26,6 +26,14 @@ user unless they asked you to run them.
 
 - Base: `pytorch/pytorch:2.14.1-cuda13.0-cudnn9-devel`. RTX 50 series needs
   CUDA 12.8 or newer; do not downgrade below that.
+- CUDA 13 needs NVIDIA driver 580 or newer. On hosts with an older driver
+  (the RTX 3060 host runs 550), `docker/host_setup.sh` writes
+  `BASE_IMAGE=pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel` to `docker/.env`:
+  torch 2.6, conda Python 3.11 in `/opt/conda`, cmake 3.31 from conda on PATH.
+  The notes below about the system Python 3.12 apply to the default base only.
+- `phonetic-candidate-ime` runs the input method server from the same image
+  with `restart: unless-stopped` (options in `ZHUYIN_IME_ARGS`); build the
+  image through `phonetic-candidate-dev` first.
 - The base image has no conda: torch lives in the system Python 3.12
   (`/usr/local/lib/python3.12/dist-packages`), which is PEP 668 externally
   managed. `PIP_BREAK_SYSTEM_PACKAGES=1` is set in the dev stage; any new

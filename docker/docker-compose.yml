@@ -6,6 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
+        BASE_IMAGE: ${BASE_IMAGE:-pytorch/pytorch:2.14.1-cuda13.0-cudnn9-devel}
         UID: ${HOST_UID:-1000}
         GID: ${HOST_GID:-1000}
     image: phonetic-candidate:dev
@@ -29,6 +30,30 @@ services:
     stdin_open: true
     tty: true
     command: sleep infinity
+
+  # Conversion server for the input method (docs/ime.md). It restarts with the
+  # Docker daemon, so the IBus front end finds its socket after a reboot.
+  # Uses the image built for phonetic-candidate-dev; set ZHUYIN_IME_ARGS in
+  # docker/.env to change the reranker.
+  phonetic-candidate-ime:
+    image: phonetic-candidate:dev
+    container_name: phonetic-candidate-ime
+    working_dir: /workspace
+    volumes:
+      - ..:/workspace
+      - hf-cache:/cache/huggingface
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    command: python -m zhuyin_ime.server ${ZHUYIN_IME_ARGS:---reranker outputs/lm/qwen2.5-0.5b-zhtw}
 
 volumes:
   hf-cache:

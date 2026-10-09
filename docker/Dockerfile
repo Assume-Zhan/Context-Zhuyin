@@ -1,3 +1,6 @@
+# CUDA 13 needs NVIDIA driver 580 or newer. On hosts with an older driver,
+# docker/host_setup.sh sets BASE_IMAGE in docker/.env to a CUDA 12.4 image
+# (torch 2.6, conda Python 3.11, its own cmake 3.31 on PATH).
 ARG BASE_IMAGE=pytorch/pytorch:2.14.1-cuda13.0-cudnn9-devel
 
 # ---------------------------------------------------------------------------

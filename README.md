@@ -103,6 +103,19 @@ dzd python -m zhuyin_ime.server --reranker outputs/lm/qwen2.5-0.5b-zhtw --graph
 
 To stop it: `dz pkill -f zhuyin_ime.server`.
 
+To use the input method every day, run the server as its own service
+instead; it restarts with Docker, so it is back after a reboot:
+
+```bash
+docker compose -f docker/docker-compose.yml up -d phonetic-candidate-ime
+docker compose -f docker/docker-compose.yml logs -f phonetic-candidate-ime
+```
+
+It runs the Qwen GPU reranker without `--graph`; set other server options
+with `ZHUYIN_IME_ARGS` in `docker/.env` (for example
+`ZHUYIN_IME_ARGS=--reranker outputs/lm/qwen2.5-0.5b-zhtw --graph` on an
+RTX 5090) and run the `up -d` again. `docker compose down` stops it too.
+
 Without Docker, the decoder-only server runs on the host with Python 3.10+
 and numpy, once `outputs/dict/` and `outputs/ngram/zhtw-o4` exist (the CPU
 reranker additionally needs a CPU build of PyTorch):
@@ -111,8 +124,9 @@ reranker additionally needs a CPU build of PyTorch):
 PYTHONPATH=src python3 -m zhuyin_ime.server
 ```
 
-The GPU reranker also runs on the host, which avoids the container's CUDA 13
-requirement (NVIDIA driver 580 or newer): a PyTorch CUDA 12.x build also runs
+The GPU reranker also runs on the host. (The container needs no driver
+upgrade either: `docker/host_setup.sh` picks a CUDA 12.4 base image when the
+driver is older than 580.) A PyTorch CUDA 12.x build also runs
 on older 12.x drivers through CUDA minor version compatibility (tested:
 driver 550, torch 2.9.0+cu128, RTX 3060). With
 PyTorch already installed for the system Python, add the rest in a venv

@@ -33,7 +33,14 @@ host desktop session                      dev container (or any machine with the
 
 ## Running
 
-In the dev container (from the repo root):
+As a service that restarts with Docker (Qwen reranker on the GPU; options
+in `ZHUYIN_IME_ARGS` in `docker/.env`):
+
+```bash
+docker compose -f docker/docker-compose.yml up -d phonetic-candidate-ime
+```
+
+Or by hand in the dev container (from the repo root):
 
 ```bash
 python -m zhuyin_ime.server                                                 # decoder only, CPU
