@@ -182,7 +182,7 @@ def build_scorer(model: str, device: str, dtype: str, threads: int, graph: bool 
     return scorer
 
 
-def build_charlm_scorer(path: str, engine: Engine, threads: int):
+def build_charlm_scorer(path: str, engine: Engine, threads: int, int8: bool = False):
     os.environ.setdefault("OMP_NUM_THREADS", str(threads))
     os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
     import torch
@@ -195,7 +195,10 @@ def build_charlm_scorer(path: str, engine: Engine, threads: int):
     def homophones(syl: str) -> list[str]:
         return [p for p, _ in lexicon.lookup_span((syl,))]
 
-    return CharLMScorer(path, device="cpu", homophones=homophones)
+    scorer = CharLMScorer(path, device="cpu", homophones=homophones)
+    if int8:
+        scorer.quantize_dynamic_int8()
+    return scorer
 
 
 def main() -> None:
@@ -210,7 +213,8 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=1, help="CPU threads for the reranker")
     ap.add_argument("--graph", action="store_true", help="replay the scoring forward as a CUDA graph")
     ap.add_argument("--reranker-type", default="qwen", choices=["qwen", "charlm"], help="charlm: CPU")
-    ap.add_argument("--normalizer", default="homophone", choices=["homophone", "full"], help="charlm only")
+    ap.add_argument("--normalizer", default="full", choices=["homophone", "full"], help="charlm only")
+    ap.add_argument("--int8", action="store_true", help="charlm only: int8 dynamic quantization")
     ap.add_argument("--debounce-ms", type=float, default=100.0)
     # Fusion score = lm + a * ngram - beta * [not the decoder 1-best]; tuned on
     # dev for the zh-TW model (use about a=0.75 with the base Qwen model).
@@ -223,7 +227,7 @@ def main() -> None:
     engine = build_engine(args.ngram, args.dict_dir, args.beam, (args.fusion_a, args.fusion_beta))
     reranker = None
     if args.reranker and args.reranker_type == "charlm":
-        scorer = build_charlm_scorer(args.reranker, engine, args.threads)
+        scorer = build_charlm_scorer(args.reranker, engine, args.threads, args.int8)
         reranker = Reranker(scorer, args.debounce_ms, homophone=args.normalizer == "homophone")
     elif args.reranker:
         scorer = build_scorer(args.reranker, args.device, args.dtype, args.threads, args.graph)
