@@ -30,10 +30,11 @@ def test_ibus_engine_end_to_end():
     assert result["last_preedit"] == "我明天再去學校"
     assert result["comma_preedit"] == "我，明天"
     assert result["table"] == {"cursor": 1, "vertical": True}
-    first, second, third = result["commits"]
+    first, second = result["commits"]  # the text dropped by Shift is never committed
     assert first == "我明天再去學校"
     assert second.startswith("我，") and len(second) == 4
     # Shift taps: English, Chinese, English, Chinese; Shift+< in between is not a tap.
     assert result["english_passthrough"]
-    assert result["mixed_preedit"] == third == "我，ok"
+    assert result["comma_only"] == "我，"
+    assert result["dropped_preedit"] == "" and result["english_after_drop"]
     assert [m for m in result["modes"] if m in ("中", "英")][-4:] == ["英", "中", "英", "中"]

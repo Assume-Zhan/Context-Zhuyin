@@ -5,7 +5,8 @@ the standard library and PyGObject with the IBus typelib. All conversion
 happens in the server (python -m zhuyin_ime.server), reachable through a
 Unix socket; if the server is down, keys pass through untouched.
 
-Tapping Shift alone switches between Chinese and English input; the mode is
+Tapping Shift alone switches between Chinese and English input and drops the
+text not committed yet, so a wrong start needs no BackSpace; the mode is
 shared by all windows and shown as the InputMode property (GNOME Shell puts
 its symbol in the top bar).
 
@@ -181,6 +182,8 @@ class ZhuyinLmEngine(IBus.Engine):
         self.update_property(self.mode_prop)
 
     def _toggle_mode(self) -> None:
+        # Drop the preedit, the syllable being composed and the candidate window.
+        self._request("reset")
         ZhuyinLmEngine.english = not ZhuyinLmEngine.english
         self._show_mode()
 

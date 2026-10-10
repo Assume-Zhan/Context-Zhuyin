@@ -102,6 +102,7 @@ def main() -> None:
         preedits: list[str] = []
         ic.connect("commit-text", lambda _ic, text: commits.append(text.get_text()))
         ic.connect("update-preedit-text", lambda _ic, text, cursor, visible: preedits.append(text.get_text()))
+        ic.connect("hide-preedit-text", lambda _ic: preedits.append(""))  # an empty preedit is hidden
         tables: list[dict] = []
 
         def on_table(_ic, table, visible) -> None:
@@ -167,15 +168,16 @@ def main() -> None:
         press(IBus.KEY_less, IBus.ModifierType.SHIFT_MASK)
         ic.process_key_event(IBus.KEY_Shift_L, 0, shift_up)
         pump(0.05)
-        tap_shift()  # English letters join the preedit while it has text
-        for ch in "ok":
-            press(IBus.unicode_to_keyval(ch))
-        mixed_preedit = preedits[-1] if preedits else ""
-        press(IBus.KEY_Return)
+        comma_only = preedits[-1] if preedits else ""
+        tap_shift()  # English: drops the uncommitted text, then keys go to the application
+        dropped_preedit = preedits[-1] if preedits else ""
+        english_after_drop = not any(press(IBus.unicode_to_keyval(ch)) for ch in "ok")
         tap_shift()
         pump(0.3)
         result = {"commits": commits, "last_preedit": last_preedit, "comma_preedit": comma_preedit}
-        result |= {"english_passthrough": english_passthrough, "mixed_preedit": mixed_preedit, "modes": modes}
+        result |= {"english_passthrough": english_passthrough, "modes": modes}
+        result |= {"comma_only": comma_only, "dropped_preedit": dropped_preedit}
+        result |= {"english_after_drop": english_after_drop}
         print(json.dumps(result | {"table": table}, ensure_ascii=False))
     finally:
         for p in reversed(procs):
